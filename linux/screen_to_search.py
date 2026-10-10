@@ -22,6 +22,17 @@ from v6_ocr import available as ocr_available, recognize_text
 DEFAULTS = {"search_engine": "google", "translation_language": "en",
             "hold_milliseconds": 350, "shortcut_enabled": True, "launch_at_sign_in": False}
 APP_ID = "org.screentosearch.ScreenToSearch"
+
+
+def wayland_desktop():
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        return None
+    desktops = os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":")
+    if "KDE" in desktops or "PLASMA" in desktops:
+        return "KDE Plasma"
+    if "GNOME" in desktops:
+        return "GNOME"
+    return None
 SEARCH_URLS = {
     "google": "https://www.google.com/search?q=",
     "bing": "https://www.bing.com/search?q=",
@@ -61,12 +72,12 @@ def save_settings(settings):
     path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
-def install_gnome():
+def install_desktop():
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     app_dir = base / "screen-to-search"
     app_dir.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent
-    for name in ("screen_to_search.py", "gnome_app.py", "word_selection.py", "v6_ocr.py"):
+    for name in ("screen_to_search.py", "wayland_app.py", "word_selection.py", "v6_ocr.py"):
         if (source / name).resolve() != (app_dir / name).resolve():
             shutil.copy2(source / name, app_dir / name)
     from v6_ocr import model_dir
@@ -93,8 +104,8 @@ def install_gnome():
     desktop.write_text("[Desktop Entry]\nType=Application\nName=Screen to Search\n"
                        + "Exec=" + quoted_launcher + "\nIcon=" + str(icon) + "\nTerminal=false\n"
                        + "Categories=Utility;Graphics;\n", encoding="utf-8")
-    print(f"Installed GNOME launcher: {desktop}")
-    print("Launch Screen to Search from GNOME's app grid to approve its global shortcut.")
+    print(f"Installed desktop launcher: {desktop}")
+    print("Launch Screen to Search from your desktop's app launcher to approve its global shortcut.")
 
 
 def autostart_path():
@@ -109,7 +120,7 @@ def set_autostart(enabled):
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     desktop = base / "applications" / (APP_ID + ".desktop")
     if not desktop.exists():
-        raise RuntimeError("Install the GNOME launcher before enabling start at sign-in.")
+        raise RuntimeError("Install the desktop launcher before enabling start at sign-in.")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(desktop, destination)
 
@@ -216,10 +227,10 @@ def open_text(kind, text, settings):
 
 
 def check_dependencies():
-    gnome_wayland = "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper() and bool(os.environ.get("WAYLAND_DISPLAY"))
-    if gnome_wayland:
+    desktop = wayland_desktop()
+    if desktop:
         ready = ocr_available()
-        print("Display: GNOME Wayland")
+        print(f"Display: {desktop} Wayland")
         print("Screenshot and shortcut: XDG desktop portals")
         print("OCR: PP-OCRv6" if ready else "OCR: missing rapidocr, onnxruntime, or v6 models")
         try:
@@ -395,16 +406,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Screen to Search for Linux")
     parser.add_argument("--capture", action="store_true", help="capture a region immediately")
     parser.add_argument("--check", action="store_true", help="show installed Linux dependencies")
-    parser.add_argument("--install-gnome", action="store_true", help="install the GNOME launcher for portal permissions")
+    parser.add_argument("--install-desktop", "--install-gnome", action="store_true",
+                        help="install a GNOME or KDE Plasma launcher for portal permissions")
     args = parser.parse_args(argv)
-    if args.install_gnome:
-        install_gnome()
+    if args.install_desktop:
+        install_desktop()
         return 0
     if args.check:
         return check_dependencies()
     try:
-        if "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper() and os.environ.get("WAYLAND_DISPLAY"):
-            from gnome_app import run
+        if wayland_desktop():
+            from wayland_app import run
             run(args.capture)
         else:
             run_gui(args.capture)

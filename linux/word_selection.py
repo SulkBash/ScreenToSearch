@@ -1,4 +1,4 @@
-"""Word geometry shared by the GNOME capture overlay."""
+"""Word geometry shared by the Wayland capture overlay."""
 
 from dataclasses import dataclass
 

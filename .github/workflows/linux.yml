@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-gi python3-cairo python3-gi-cairo gir1.2-gtk-3.0 xvfb mutter dbus-x11
-      - name: Construct GNOME capture overlay
+      - name: Construct Wayland capture overlay
         run: xvfb-run -a /usr/bin/python3 linux/tests/gtk_smoke.py
       - name: Construct capture overlay on headless Wayland
         env:
@@ -50,5 +50,21 @@ jobs:
           export XDG_RUNTIME_DIR="$(mktemp -d)"
           chmod 700 "$XDG_RUNTIME_DIR"
           export XDG_DATA_HOME="$(mktemp -d)"
-          /usr/bin/python3 linux/screen_to_search.py --install-gnome
+          /usr/bin/python3 linux/screen_to_search.py --install-desktop
           dbus-run-session -- bash linux/tests/run_portal_smoke.sh
+      - name: Install KDE Plasma and portals
+        run: sudo apt-get install -y kwin-wayland plasma-workspace xdg-desktop-portal-kde
+      - name: Open a Global Shortcuts session in headless KDE Plasma
+        env:
+          XDG_CURRENT_DESKTOP: KDE
+          XDG_SESSION_TYPE: wayland
+          GDK_BACKEND: wayland
+          QT_QPA_PLATFORM: wayland
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          WAYLAND_DISPLAY: wayland-sts-kde
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          export XDG_DATA_HOME="$(mktemp -d)"
+          /usr/bin/python3 linux/screen_to_search.py --install-desktop
+          dbus-run-session -- bash linux/tests/run_kde_portal_smoke.sh

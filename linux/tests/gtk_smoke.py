@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gnome_app import CaptureOverlay
+from wayland_app import CaptureOverlay
 from gi.repository import GdkPixbuf, Gtk
 
 

@@ -4,7 +4,7 @@
 
 Want to copy text from a screenshot or look up something you spotted in an app? Screen to Search lets you select what's on your display, even when the app you're looking at won't let you highlight it. Copy text or an image, search for selected text, or open it in Google Translate.
 
-The Windows app runs from the system tray on Windows 10 and 11 (x64). The GNOME Wayland app provides a resident indicator, hold shortcut, fullscreen word selection, Smart/Text/Rectangle/Lasso modes, local OCR, and the same copy, search, and translate actions. You don't need an account, and text recognition happens on your computer.
+The Windows app runs from the system tray on Windows 10 and 11 (x64). The GNOME and KDE Plasma Wayland app provides a resident indicator, hold shortcut, fullscreen word selection, Smart/Text/Rectangle/Lasso modes, local OCR, and the same copy, search, and translate actions. You don't need an account, and text recognition happens on your computer.
 
 ## Get started
 
@@ -31,22 +31,22 @@ The default **Smart** mode handles most selections. Use **Text** if you want to 
 
 ## Linux
 
-The Linux entry point is [linux/screen_to_search.py](linux/screen_to_search.py). It uses the same bundled PP-OCRv6 detector, recognizer, and dictionary as Windows, through RapidOCR for Python. On GNOME Wayland it uses GTK 3 and the [Screenshot](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html) and [Global Shortcuts](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html) portals. Other Linux sessions use the region-selection window described below.
+The Linux entry point is [linux/screen_to_search.py](linux/screen_to_search.py). It uses the same bundled PP-OCRv6 detector, recognizer, and dictionary as Windows, through RapidOCR for Python. On GNOME and KDE Plasma Wayland it uses GTK 3 and the [Screenshot](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html) and [Global Shortcuts](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html) portals. Other Linux sessions use the region-selection window described below.
 
-### GNOME 48 or newer on Wayland
+### GNOME 48 or newer or KDE Plasma on Wayland
 
-Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout. GNOME 48 or newer is required for the Global Shortcuts portal used by the hold shortcut.
+Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout. GNOME 48 or newer is required for the Global Shortcuts portal used by the hold shortcut. KDE Plasma must have `xdg-desktop-portal-kde` with both Screenshot and Global Shortcuts interfaces available.
 
-Install Python 3, `python3-gi`, `python3-cairo`, `python3-gi-cairo`, GTK 3's Python introspection package, `wl-clipboard`, and Ayatana AppIndicator's introspection package. Install `rapidocr` and `onnxruntime` into the same Python environment as the launcher (`python3 -m pip install rapidocr onnxruntime`). Keep `linux/models/v6` from the release archive beside the scripts. Enable [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) so the app's indicator appears in GNOME's top bar. Package names vary by distribution; on Debian or Ubuntu the GTK and indicator introspection packages are commonly `gir1.2-gtk-3.0` and `gir1.2-ayatanaappindicator3-0.1`.
+Install Python 3, `python3-gi`, `python3-cairo`, `python3-gi-cairo`, GTK 3's Python introspection package, `wl-clipboard`, and Ayatana AppIndicator's introspection package. On KDE also install `xdg-desktop-portal-kde`. Install `rapidocr` and `onnxruntime` into the same Python environment as the launcher (`python3 -m pip install rapidocr onnxruntime`). Keep `linux/models/v6` from the release archive beside the scripts. On GNOME, enable [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) so the app's indicator appears in the top bar; Plasma has a system tray. Package names vary by distribution; on Debian or Ubuntu the GTK and indicator introspection packages are commonly `gir1.2-gtk-3.0` and `gir1.2-ayatanaappindicator3-0.1`.
 
 ```sh
 python3 linux/screen_to_search.py --check
-python3 linux/screen_to_search.py --install-gnome
+python3 linux/screen_to_search.py --install-desktop
 ```
 
-Launch **Screen to Search** from GNOME's app grid. The install step copies the Linux files and v6 models into your local data directory and creates the desktop entry needed for [portal app identification](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.host.portal.Registry.html). GNOME asks you to assign and approve the capture shortcut when the app starts. Its suggested key is **F8**; use **Change shortcut** in Settings to choose another key. Hold the assigned shortcut for the duration configured in Settings (350 ms by default), or choose **Capture** from the indicator. A fullscreen capture overlay opens on each monitor. Click a word, drag across words, use Rectangle or Lasso, then choose **Copy text**, **Copy image**, **Search text**, or **Translate**. Settings also controls search engine, translation language, shortcut enablement, and launch at sign-in. A second launch opens Settings in the running app.
+Launch **Screen to Search** from your desktop's app launcher. The install step copies the Linux files and v6 models into your local data directory and creates the desktop entry needed for [portal app identification](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.host.portal.Registry.html). Your desktop asks you to assign and approve the capture shortcut when the app starts. Its suggested key is **F8**; use **Change shortcut** in Settings to choose another key. Hold the assigned shortcut for the duration configured in Settings (350 ms by default), or choose **Capture** from the indicator. A fullscreen capture overlay opens on each monitor. Click a word, drag across words, use Rectangle or Lasso, then choose **Copy text**, **Copy image**, **Search text**, or **Translate**. Settings also controls search engine, translation language, shortcut enablement, and launch at sign-in. A second launch opens Settings in the running app.
 
-GNOME owns the global shortcut. Its portal reports presses and releases, but does not offer the Windows app's short-tap key replay, so a quick tap of the assigned shortcut is consumed by GNOME. GNOME also decides which shortcuts it will allow. Both platforms use the same v6 model files, though their OCR wrappers may produce different word boxes. Mixed-DPI monitor layouts need an on-device check because the portal screenshot and GTK monitor geometry can use different scales.
+The desktop owns the global shortcut. Its portal reports presses and releases, but does not offer the Windows app's short-tap key replay, so a quick tap of the assigned shortcut is consumed by the desktop. The desktop decides which shortcuts it will allow. Both platforms use the same v6 model files, though their OCR wrappers may produce different word boxes. Mixed-DPI monitor layouts need an on-device check because the portal screenshot and GTK monitor geometry can use different scales.
 
 ### Other Linux desktops
 
@@ -57,7 +57,7 @@ Install `python3-tk`, `rapidocr`, `onnxruntime`, and the appropriate packages fo
 | Session | Region capture | Clipboard |
 | --- | --- | --- |
 | Wayland with wlroots | `grim` and `slurp` | `wl-clipboard` |
-| KDE Plasma | `spectacle` | `wl-clipboard` on Wayland, `xclip` on X11 |
+| KDE Plasma X11 | `spectacle` | `xclip` |
 | GNOME | `gnome-screenshot` or `flameshot` where supported by the session | `wl-clipboard` on Wayland, `xclip` on X11 |
 | Other X11 desktops | `maim`, `flameshot`, or ImageMagick `import` | `xclip` |
 
@@ -70,7 +70,7 @@ python3 linux/screen_to_search.py
 
 Click **Capture region**, select an area using your desktop's capture tool, then use **Copy image**, **Copy text**, **Search text**, or **Translate**. The OCR text is editable; highlight part of it to use only that passage. Settings are saved in `$XDG_CONFIG_HOME/screen-to-search/settings.json` (or `~/.config/screen-to-search/settings.json`).
 
-On other desktops, bind `python3 /absolute/path/to/linux/screen_to_search.py --capture` as a custom keyboard shortcut in your desktop's settings to launch directly into region selection. The region-selection window currently lacks the GNOME resident indicator, hold shortcut, and word-level overlay.
+On other desktops, bind `python3 /absolute/path/to/linux/screen_to_search.py --capture` as a custom keyboard shortcut in your desktop's settings to launch directly into region selection. The region-selection window currently lacks the Wayland resident indicator, hold shortcut, and word-level overlay.
 
 ## Privacy and limitations
 

@@ -1,4 +1,4 @@
-"""GNOME Wayland resident host: portal shortcut, indicator, and OCR overlay."""
+"""GNOME and KDE Plasma Wayland host: portal shortcut, indicator, and OCR overlay."""
 
 import importlib
 import io
@@ -21,7 +21,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 from screen_to_search import (APP_ID, SEARCH_URLS, autostart_path, copy_data, load_settings,
-                              open_text, save_settings, set_autostart)
+                              open_text, save_settings, set_autostart, wayland_desktop)
 from v6_ocr import recognize_text, recognize_words
 from word_selection import Word, bounds_for_indices, monitor_crops, text_for_indices
 
@@ -86,7 +86,7 @@ class Portal:
             raise RuntimeError(f"{method} timed out.")
         code, payload = result["value"]
         if code != 0:
-            raise RuntimeError(f"{method} was cancelled or denied by GNOME (code {code}).")
+            raise RuntimeError(f"{method} was cancelled or denied by the desktop (code {code}).")
         return {key: variant.unpack() if hasattr(variant, "unpack") else variant
                 for key, variant in payload.items()}
 
@@ -124,7 +124,7 @@ class Shortcut:
         bound = self.portal.request("org.freedesktop.portal.GlobalShortcuts", "BindShortcuts",
                                     "(oa(sa{sv})sa{sv})", (self.session, shortcut, ""), 120)
         if not bound.get("shortcuts"):
-            raise RuntimeError("No global shortcut was assigned in GNOME.")
+            raise RuntimeError("No global shortcut was assigned by the desktop.")
 
         def signal(_bus, _sender, _path, _interface, name, parameters):
             session, shortcut_id, _time, _options = parameters.unpack()
@@ -579,7 +579,7 @@ class CaptureOverlay(Gtk.Window):
             self.host.error(str(exc))
 
 
-class GnomeHost:
+class WaylandHost:
     LANGUAGES = (("English", "en"), ("Spanish", "es"), ("French", "fr"),
                  ("German", "de"), ("Portuguese", "pt"), ("Italian", "it"),
                  ("Japanese", "ja"), ("Korean", "ko"), ("Chinese (Simplified)", "zh-CN"),
@@ -613,7 +613,8 @@ class GnomeHost:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_border_width(16)
         self.window.add(box)
-        box.pack_start(Gtk.Label(label="Hold the GNOME shortcut to capture, or click Capture."), False, False, 0)
+        box.pack_start(Gtk.Label(label=f"Hold the {wayland_desktop()} shortcut to capture, or click Capture."),
+                       False, False, 0)
         capture = Gtk.Button(label="Capture now")
         capture.connect("clicked", lambda *_: self.capture())
         box.pack_start(capture, False, False, 0)
@@ -870,7 +871,7 @@ def run(capture_now=False):
             os.chmod(socket_path, 0o600)
             server.listen(2)
             server.settimeout(0.5)
-            host = GnomeHost(capture_now)
+            host = WaylandHost(capture_now)
             stopping = threading.Event()
 
             def accept_commands():

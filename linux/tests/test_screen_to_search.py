@@ -12,6 +12,17 @@ import v6_ocr
 
 
 class LinuxAppTests(unittest.TestCase):
+    def test_resident_wayland_desktop_selection(self):
+        for name, expected in (("KDE", "KDE Plasma"), ("KDE:Plasma", "KDE Plasma"),
+                               ("GNOME", "GNOME"), ("ubuntu:GNOME", "GNOME"),
+                               ("sway", None)):
+            with self.subTest(name=name), patch.dict(os.environ, {
+                "WAYLAND_DISPLAY": "wayland-0", "XDG_CURRENT_DESKTOP": name,
+            }):
+                self.assertEqual(app.wayland_desktop(), expected)
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": "", "XDG_CURRENT_DESKTOP": "KDE"}):
+            self.assertIsNone(app.wayland_desktop())
+
     def test_word_level_selection_and_bounds(self):
         words = [Word("Hello", 10, 20, 20, 10, (0, 0, 0)),
                  Word("world", 35, 20, 25, 10, (0, 0, 0)),
@@ -33,10 +44,10 @@ class LinuxAppTests(unittest.TestCase):
         self.assertEqual(text_for_indices(words, {0, 1, 2}), "搜索词")
         self.assertEqual(bounds_for_indices(words, {1}), (20, 20, 30, 32))
 
-    def test_gnome_install_creates_portal_desktop_identity(self):
+    def test_desktop_install_creates_portal_desktop_identity(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]) as directory, \
              patch.dict(os.environ, {"XDG_DATA_HOME": directory}):
-            app.install_gnome()
+            app.install_desktop()
             desktop = Path(directory) / "applications" / (app.APP_ID + ".desktop")
             self.assertIn("Name=Screen to Search", desktop.read_text(encoding="utf-8"))
             self.assertTrue((Path(directory) / "screen-to-search" / "launch").exists())

@@ -1,4 +1,4 @@
-"""Check the app's real GNOME portal connection without requesting user consent."""
+"""Check the app's real desktop portal connection without requesting user consent."""
 
 from pathlib import Path
 import sys
@@ -6,7 +6,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gnome_app import Portal, PORTAL_NAME, PORTAL_PATH
+from wayland_app import Portal, PORTAL_NAME, PORTAL_PATH
 from gi.repository import Gio, GLib
 
 
@@ -27,4 +27,4 @@ session = created.get("session_handle")
 assert session and session.startswith("/org/freedesktop/portal/desktop/session/"), created
 portal.bus.call_sync(PORTAL_NAME, session, "org.freedesktop.portal.Session", "Close",
                      None, None, Gio.DBusCallFlags.NONE, 5000, None)
-print("GNOME Screenshot and Global Shortcuts portals are available; shortcut session opened")
+print("Screenshot and Global Shortcuts portals are available; shortcut session opened")
