@@ -33,9 +33,9 @@ The default **Smart** mode handles most selections. Use **Text** if you want to 
 
 The Linux entry point is [linux/screen_to_search.py](linux/screen_to_search.py). It uses the same bundled PP-OCRv6 detector, recognizer, and dictionary as Windows, through RapidOCR for Python. On GNOME Wayland it uses GTK 3 and the [Screenshot](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html) and [Global Shortcuts](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html) portals. Other Linux sessions use the region-selection window described below.
 
-### GNOME on Wayland
+### GNOME 48 or newer on Wayland
 
-Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout.
+Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout. GNOME 48 or newer is required for the Global Shortcuts portal used by the hold shortcut.
 
 Install Python 3, `python3-gi`, `python3-cairo`, `python3-gi-cairo`, GTK 3's Python introspection package, `wl-clipboard`, and Ayatana AppIndicator's introspection package. Install `rapidocr` and `onnxruntime` into the same Python environment as the launcher (`python3 -m pip install rapidocr onnxruntime`). Keep `linux/models/v6` from the release archive beside the scripts. Enable [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) so the app's indicator appears in GNOME's top bar. Package names vary by distribution; on Debian or Ubuntu the GTK and indicator introspection packages are commonly `gir1.2-gtk-3.0` and `gir1.2-ayatanaappindicator3-0.1`.
 

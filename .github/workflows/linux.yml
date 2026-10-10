@@ -8,7 +8,7 @@ on:
 
 jobs:
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - name: Check Python syntax
@@ -37,3 +37,7 @@ jobs:
           export XDG_RUNTIME_DIR="$(mktemp -d)"
           chmod 700 "$XDG_RUNTIME_DIR"
           dbus-run-session -- mutter --wayland --no-x11 --sm-disable --headless --virtual-monitor=1280x800 -- /usr/bin/python3 linux/tests/wayland_smoke.py
+      - name: Install GNOME Shell and portals
+        run: sudo apt-get install -y gnome-shell xdg-desktop-portal xdg-desktop-portal-gnome
+      - name: Open a Global Shortcuts session in headless GNOME
+        run: dbus-run-session -- bash linux/tests/run_portal_smoke.sh
