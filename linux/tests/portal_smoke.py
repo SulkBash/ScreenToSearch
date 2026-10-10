@@ -5,8 +5,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gi.repository import Gio, GLib
 from gnome_app import Portal, PORTAL_NAME, PORTAL_PATH
+from gi.repository import Gio, GLib
 
 
 portal = Portal()
