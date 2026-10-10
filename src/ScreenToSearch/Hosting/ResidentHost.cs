@@ -71,17 +71,14 @@ internal sealed class ResidentHost : IDisposable
         SystemEvents.DisplaySettingsChanged += DisplaySettingsChanged;
         _hook.Start();
         _ = ListenForSecondLaunchAsync();
-        if (NeuralOcrService.SupportsLanguage(_settings.OcrLanguage))
-            _ = WarmUpOcrAsync();
+        _ = WarmUpOcrAsync();
     }
 
     private async Task WarmUpOcrAsync()
     {
         try
         {
-            if (NeuralOcrService.UsesMultilingualModel(_settings.OcrLanguage))
-                await NeuralOcrService.WarmUpMultilingualAsync(_pipeCancellation.Token);
-            else await NeuralOcrService.WarmUpAsync(_pipeCancellation.Token);
+            await NeuralOcrService.WarmUpAsync(_pipeCancellation.Token);
         }
         catch (OperationCanceledException) { }
         catch { /* Recognition will report a model loading error when requested. */ }
@@ -111,8 +108,6 @@ internal sealed class ResidentHost : IDisposable
     {
         _holdTimer.Stop();
         _hook.SetShortcut(_settings.Shortcut);
-        if (NeuralOcrService.SupportsLanguage(_settings.OcrLanguage))
-            _ = WarmUpOcrAsync();
     }
 
     public void ShowSettings()

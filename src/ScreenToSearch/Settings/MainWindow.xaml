@@ -503,8 +503,8 @@
                             <TextBlock Text="Text and search" Style="{StaticResource SectionTitle}"
                                        Margin="0,0,0,24"/>
                             <TextBlock Text="Read text with" Style="{StaticResource Label}"/>
-                            <ComboBox x:Name="OcrLanguageBox" Margin="0,8,0,0"
-                                      SelectionChanged="OcrLanguageChanged"/>
+                            <TextBlock Text="Automatic multilingual OCR (PP-OCRv6)" FontSize="12"
+                                       Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
                             <TextBlock Text="Search with" Style="{StaticResource Label}"
                                        Margin="0,18,0,0"/>
                             <ComboBox x:Name="SearchBox" Margin="0,8,0,0" SelectionChanged="SearchChanged">

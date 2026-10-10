@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="RapidOcrNet" Version="4.2.0" />
+    <ProjectReference Include="..\RapidOcrNetV6\RapidOcrNetV6.csproj" />
   </ItemGroup>
 
 </Project>

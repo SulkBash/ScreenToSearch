@@ -8,72 +8,36 @@ internal sealed class NeuralOcrService
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static RapidOcr? _engine;
-    private static RapidOcr? _multilingualEngine;
-
-    public static bool SupportsLanguage(string language) => language is "auto" or "en" or "es" or "fr"
-        or "de" or "pt" or "it" or "zh-CN" or "ja";
-
-    public static bool UsesMultilingualModel(string language) => language is "auto" or "zh-CN" or "ja";
 
     public static async Task WarmUpAsync(CancellationToken cancellationToken = default)
     {
         await Gate.WaitAsync(cancellationToken);
-        try { await Task.Run(() => GetEngine(multilingual: false), cancellationToken); }
+        try { await Task.Run(GetEngine, cancellationToken); }
         finally { Gate.Release(); }
-    }
-
-    public static async Task WarmUpMultilingualAsync(CancellationToken cancellationToken = default)
-    {
-        await Gate.WaitAsync(cancellationToken);
-        try { await Task.Run(() => GetEngine(multilingual: true), cancellationToken); }
-        finally { Gate.Release(); }
-    }
-
-    public async Task<OcrDocument> RecognizeForLanguageAsync(byte[] image, string language,
-        CancellationToken cancellationToken = default, int maxSide = 0)
-    {
-        if (!UsesMultilingualModel(language)) return await RecognizeAsync(image, cancellationToken,
-            maxSide > 0 ? maxSide : 1024);
-        try { return await RecognizeMultilingualAsync(image, cancellationToken, maxSide); }
-        catch (OperationCanceledException) { throw; }
-        catch when (language == "auto") { return await RecognizeAsync(image, cancellationToken,
-            maxSide > 0 ? maxSide : 1024); }
     }
 
     public async Task<OcrDocument> RecognizeAsync(byte[] image, CancellationToken cancellationToken = default,
-        int maxSide = 1024)
+        int maxSide = 0)
     {
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await RecognizeCoreAsync(image, maxSide, multilingual: false, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally { Gate.Release(); }
-    }
-
-    public async Task<OcrDocument> RecognizeMultilingualAsync(byte[] image,
-        CancellationToken cancellationToken = default, int maxSide = 0)
-    {
-        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await RecognizeCoreAsync(image, maxSide, multilingual: true, cancellationToken)
+            return await RecognizeCoreAsync(image, maxSide, cancellationToken)
                 .ConfigureAwait(false);
         }
         finally { Gate.Release(); }
     }
 
     private static async Task<OcrDocument> RecognizeCoreAsync(byte[] image, int maxSide,
-        bool multilingual, CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
-        var engine = GetEngine(multilingual);
+        var engine = GetEngine();
         using var bitmap = await Task.Run(() => SKBitmap.Decode(image), cancellationToken)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException("The OCR image could not be decoded.");
-        var options = (multilingual ? RapidOcrOptions.PPOCRv6 : RapidOcrOptions.Default) with
+        var options = RapidOcrOptions.PPOCRv6 with
         {
-            ReturnWordBox = true, DoAngle = false
+            ReturnWordBox = true
         };
         if (maxSide > 0) options = options with { ImgResize = maxSide };
         var result = await engine.DetectAsync(bitmap, options, null, cancellationToken)
@@ -105,47 +69,60 @@ internal sealed class NeuralOcrService
             lines.Add(new OcrLine(block.Text,
                 new PixelBounds(left, top, right - left, bottom - top), words));
         }
-        return new OcrDocument(string.Join(Environment.NewLine, lines.Select(line => line.Text)), lines);
+        var rows = new List<List<OcrLine>>();
+        foreach (var line in lines.OrderBy(line => line.Bounds.Y + line.Bounds.Height / 2))
+        {
+            var row = rows.FirstOrDefault(row => SameRow(row[0].Bounds, line.Bounds));
+            if (row is null) rows.Add([line]);
+            else row.Add(line);
+        }
+        var merged = rows.Select(row =>
+        {
+            var words = new List<OcrWord>();
+            foreach (var (word, firstInBlock) in row.SelectMany(line =>
+                         line.Words.Select((word, index) => (word, index == 0)))
+                     .OrderBy(part => part.word.Bounds.X))
+            {
+                if (firstInBlock && words.Count > 0)
+                {
+                    var previous = words[^1];
+                    var gap = word.Bounds.X - previous.Bounds.X - previous.Bounds.Width;
+                    var threshold = Math.Max(2, Math.Min(previous.Bounds.Height, word.Bounds.Height) * 0.15);
+                    var separateLatinWords = previous.Text.Length > 1 && word.Text.Length > 1
+                        && previous.Text.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+                        && word.Text.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
+                    words.Add(word with { SpaceBefore = separateLatinWords || gap >= threshold });
+                }
+                else words.Add(word);
+            }
+            var left = words.Min(word => word.Bounds.X);
+            var top = words.Min(word => word.Bounds.Y);
+            var right = words.Max(word => word.Bounds.X + word.Bounds.Width);
+            var bottom = words.Max(word => word.Bounds.Y + word.Bounds.Height);
+            return new OcrLine(OcrText.Join(words),
+                new PixelBounds(left, top, right - left, bottom - top), words);
+        }).OrderBy(line => line.Bounds.Y).ToArray();
+        return new OcrDocument(string.Join(Environment.NewLine, merged.Select(line => line.Text)), merged);
     }
 
-    private static RapidOcr GetEngine(bool multilingual)
+    private static bool SameRow(PixelBounds first, PixelBounds second)
     {
-        if (multilingual)
-        {
-            var engine = _multilingualEngine ??= CreateMultilingualEngine();
-            _engine?.Dispose();
-            _engine = null;
-            return engine;
-        }
-        else
-        {
-            var engine = _engine ??= CreateEngine();
-            _multilingualEngine?.Dispose();
-            _multilingualEngine = null;
-            return engine;
-        }
+        var overlap = Math.Max(0, Math.Min(first.Y + first.Height, second.Y + second.Height)
+            - Math.Max(first.Y, second.Y));
+        var centerDistance = Math.Abs(first.Y + first.Height / 2 - second.Y - second.Height / 2);
+        return overlap >= Math.Min(first.Height, second.Height) * 0.45
+            && centerDistance <= Math.Max(first.Height, second.Height) * 0.7;
     }
+
+    private static RapidOcr GetEngine() => _engine ??= CreateEngine();
 
     private static RapidOcr CreateEngine()
-    {
-        var engine = new RapidOcr();
-        var models = Path.Combine(AppContext.BaseDirectory, "models", "v5");
-        engine.InitModels(
-            Path.Combine(models, "ch_PP-OCRv5_mobile_det.onnx"),
-            Path.Combine(models, "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx"),
-            Path.Combine(models, "latin_PP-OCRv5_rec_mobile_infer.onnx"),
-            Path.Combine(models, "ppocrv5_latin_dict.txt"));
-        return engine;
-    }
-
-    private static RapidOcr CreateMultilingualEngine()
     {
         var engine = new RapidOcr();
         var models = Path.Combine(AppContext.BaseDirectory, "models");
         var set = RapidOcrModelSet.PPOCRv6Small with
         {
             DetModelPath = Path.Combine(models, "v6", "PP-OCRv6_det_small.onnx"),
-            ClsModelPath = Path.Combine(models, "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx"),
             RecModelPath = Path.Combine(models, "v6", "PP-OCRv6_rec_small.onnx"),
             KeysPath = Path.Combine(models, "v6", "ppocrv6_small_dict.txt")
         };

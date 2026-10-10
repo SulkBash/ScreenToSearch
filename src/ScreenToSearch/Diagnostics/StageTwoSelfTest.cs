@@ -24,7 +24,7 @@ internal static class StageTwoSelfTest
             using var decoded = new Bitmap(jpg);
             var bounds = SelectionImage.RectangleBetween(new Point(780, 155), new Point(10, 20), decoded.Size);
             var crop = SelectionImage.Crop(decoded, bounds);
-            var recognized = await new NeuralOcrService().RecognizeForLanguageAsync(crop, "en");
+            var recognized = await new NeuralOcrService().RecognizeAsync(crop);
             if (!recognized.Text.Contains("CIRCLE IMAGE TEXT", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Rectangle OCR failed: {recognized.Text}");
             results["jpgRectangleOcr"] = new { recognized.Text, bounds };
@@ -36,7 +36,7 @@ internal static class StageTwoSelfTest
                 throw new InvalidOperationException("Neural OCR returned a word without a hit target.");
             results["neuralOcr"] = new { neural.Text,
                 words = neural.Lines.Sum(line => line.Words.Count) };
-            var screen = await new ScreenOcrPipeline().RecognizeAsync(jpg.ToArray(), "en");
+            var screen = await new ScreenOcrPipeline().RecognizeAsync(jpg.ToArray());
             if (!screen.Text.Contains("CIRCLE IMAGE TEXT", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Screen OCR failed: {screen.Text}");
             results["screenOcr"] = new { screen.Text,
@@ -52,7 +52,7 @@ internal static class StageTwoSelfTest
             }
             using var mixedPng = new MemoryStream();
             mixed.Save(mixedPng, ImageFormat.Png);
-            var mixedResult = await new ScreenOcrPipeline().RecognizeAsync(mixedPng.ToArray(), "auto");
+            var mixedResult = await new ScreenOcrPipeline().RecognizeAsync(mixedPng.ToArray());
             var mixedGroups = TextLayout.Build(OcrSelection.Flatten(mixedResult));
             if (!mixedGroups.Any(group => group.Text.Contains("搜索屏幕上的中文文字"))
                 || !mixedGroups.Any(group => group.Text.Contains("English and 中文 on the same screen")))
@@ -135,7 +135,7 @@ internal static class StageTwoSelfTest
                 throw new InvalidOperationException($"Text hit selection failed: {selectedText}");
             results["wordTargets"] = new { count = hits.Count, selectedText };
 
-            var fullFrame = await new ScreenOcrPipeline().RecognizeAsync(jpg.ToArray(), "en");
+            var fullFrame = await new ScreenOcrPipeline().RecognizeAsync(jpg.ToArray());
             var fullHits = OcrSelection.Flatten(fullFrame);
             var textArea = new Rectangle(20, 35, 740, 90);
             var spatialWords = OcrSelection.WordsInside(fullHits, textArea);
@@ -146,7 +146,7 @@ internal static class StageTwoSelfTest
             if (OcrSelection.WordsInside(fullHits, emptyArea).Count != 0)
                 throw new InvalidOperationException("Smart image area included text hits.");
             var emptyCrop = SelectionImage.Crop(decoded, emptyArea);
-            var emptyOcr = await new NeuralOcrService().RecognizeForLanguageAsync(emptyCrop, "en");
+            var emptyOcr = await new NeuralOcrService().RecognizeAsync(emptyCrop);
             if (!string.IsNullOrWhiteSpace(emptyOcr.Text))
                 throw new InvalidOperationException($"Smart image crop unexpectedly found text: {emptyOcr.Text}");
             results["smartGesture"] = new { spatialText, emptyCropText = emptyOcr.Text };
@@ -158,7 +158,7 @@ internal static class StageTwoSelfTest
             };
             var textLassoBounds = SelectionImage.LassoBounds(textLasso, decoded.Size);
             var maskedForOcr = SelectionImage.Crop(decoded, textLassoBounds, textLasso, whiteOutside: true);
-            var lassoOcr = await new NeuralOcrService().RecognizeForLanguageAsync(maskedForOcr, "en");
+            var lassoOcr = await new NeuralOcrService().RecognizeAsync(maskedForOcr);
             if (!lassoOcr.Text.Contains("CIRCLE IMAGE TEXT", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Lasso OCR failed: {lassoOcr.Text}");
             results["jpgLassoOcr"] = lassoOcr.Text;

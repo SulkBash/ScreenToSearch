@@ -13,7 +13,7 @@ internal static class OcrQualityProbe
         {
             var image = await File.ReadAllBytesAsync(imagePath);
             var timer = Stopwatch.StartNew();
-            var screen = await new ScreenOcrPipeline().RecognizeAsync(image, "auto");
+            var screen = await new ScreenOcrPipeline().RecognizeAsync(image);
             result["screen"] = new { words = screen.Lines.Sum(line => line.Words.Count),
                 milliseconds = timer.ElapsedMilliseconds, text = screen.Text };
             result["textGroups"] = TextLayout.Build(OcrSelection.Flatten(screen))

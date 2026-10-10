@@ -14,3 +14,5 @@ ocr-test.png
 .vs/
 .idea/
 *.log
+__pycache__/
+*.pyc

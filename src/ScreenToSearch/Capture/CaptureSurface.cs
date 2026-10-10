@@ -145,8 +145,7 @@ internal sealed class CaptureSurface : Form
             var image = _framePng;
             _framePng = null;
             if (image is null) return;
-            var detailed = await _screenOcr.RecognizeAsync(image,
-                _settings.OcrLanguage, _ocrCancellation.Token);
+            var detailed = await _screenOcr.RecognizeAsync(image, _ocrCancellation.Token);
             RunOnUi(() =>
             {
                 if (_selection is null && !_dragging)
@@ -475,8 +474,7 @@ internal sealed class CaptureSurface : Form
     {
         try
         {
-            var document = await _cropOcr.RecognizeForLanguageAsync(image,
-                _settings.OcrLanguage, _ocrCancellation.Token);
+            var document = await _cropOcr.RecognizeAsync(image, _ocrCancellation.Token);
             RunOnUi(() =>
             {
                 if (version != _selectionVersion || !ReferenceEquals(selection, _selection)) return;
@@ -506,8 +504,7 @@ internal sealed class CaptureSurface : Form
             var area = Rectangle.Intersect(new Rectangle(Point.Empty, _frame.Size),
                 new Rectangle(point.X - 120, point.Y - 55, 240, 110));
             var crop = SelectionImage.Crop(_frame, area);
-            var result = await _cropOcr.RecognizeForLanguageAsync(crop,
-                _settings.OcrLanguage, _ocrCancellation.Token);
+            var result = await _cropOcr.RecognizeAsync(crop, _ocrCancellation.Token);
             RunOnUi(() =>
             {
                 if (version != _selectionVersion) return;

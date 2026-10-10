@@ -40,7 +40,7 @@ internal static class StageZeroSelfTest
             results["capture"] = new { bytes = frame.Png.Length, ms = frame.CaptureTime.TotalMilliseconds,
                 width = active.PixelBounds.Width, height = active.PixelBounds.Height };
             var monitorOcrTimer = System.Diagnostics.Stopwatch.StartNew();
-            var monitorOcr = await new ScreenOcrPipeline().RecognizeAsync(frame.Png, "auto");
+            var monitorOcr = await new ScreenOcrPipeline().RecognizeAsync(frame.Png);
             results["monitorOcr"] = new { ms = monitorOcrTimer.ElapsedMilliseconds,
                 words = monitorOcr.Lines.Sum(l => l.Words.Count) };
 
@@ -53,7 +53,7 @@ internal static class StageZeroSelfTest
             }
             using var jpg = new MemoryStream();
             image.Save(jpg, ImageFormat.Jpeg);
-            var ocr = await new ScreenOcrPipeline().RecognizeAsync(jpg.ToArray(), "en");
+            var ocr = await new ScreenOcrPipeline().RecognizeAsync(jpg.ToArray());
             if (!ocr.Text.Contains("Hello Screen Search", StringComparison.OrdinalIgnoreCase)
                 || ocr.Lines.SelectMany(l => l.Words).Any(w => w.Bounds.Width <= 0))
                 throw new InvalidOperationException("In-process JPEG OCR failed.");

@@ -42,14 +42,9 @@ public partial class MainWindow : Window
         foreach (var (name, code) in Languages)
         {
             LanguageBox.Items.Add(new ComboBoxItem { Content = name, Tag = code });
-            if (NeuralOcrService.SupportsLanguage(code))
-                OcrLanguageBox.Items.Add(new ComboBoxItem { Content = name, Tag = code });
         }
-        OcrLanguageBox.Items.Insert(0,
-            new ComboBoxItem { Content = "Automatic", Tag = "auto" });
         LanguageBox.SelectedItem = FindItem(LanguageBox, settings.Language) ?? LanguageBox.Items[0];
         SearchBox.SelectedItem = FindItem(SearchBox, settings.SearchEngine) ?? SearchBox.Items[0];
-        OcrLanguageBox.SelectedItem = FindItem(OcrLanguageBox, settings.OcrLanguage) ?? OcrLanguageBox.Items[0];
         UpdateShortcutDisplay();
         HoldThresholdBox.Value = Math.Clamp(settings.HoldMilliseconds, 200, 1000);
         ThresholdText.Text = $"{(int)HoldThresholdBox.Value} ms";
@@ -120,14 +115,6 @@ public partial class MainWindow : Window
         if (_initializing || SearchBox.SelectedItem is not ComboBoxItem item) return;
         _settings.SearchEngine = (string)item.Tag;
         _settings.Save();
-    }
-
-    private void OcrLanguageChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_initializing || OcrLanguageBox.SelectedItem is not ComboBoxItem item) return;
-        _settings.OcrLanguage = (string)item.Tag;
-        _settings.Save();
-        SettingsChanged?.Invoke();
     }
 
     private void StartShortcutRecording(object sender, RoutedEventArgs e)
