@@ -9,7 +9,7 @@ export GDK_BACKEND=wayland
 export LIBGL_ALWAYS_SOFTWARE=1
 export WAYLAND_DISPLAY=wayland-sts
 
-gnome-shell --wayland --no-x11 --headless --virtual-monitor=1280x800 \
+gnome-shell --wayland --headless --virtual-monitor=1280x800 \
   --wayland-display="$WAYLAND_DISPLAY" >gnome-shell.log 2>&1 &
 shell_pid=$!
 trap 'kill "$shell_pid" 2>/dev/null || true; cat gnome-shell.log' EXIT
