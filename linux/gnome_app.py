@@ -113,7 +113,9 @@ class Shortcut:
 
     def start(self):
         created = self.portal.request("org.freedesktop.portal.GlobalShortcuts", "CreateSession",
-                                      "(a{sv})", (), 60)
+                                      "(a{sv})", (), 60, {
+                                          "session_handle_token": GLib.Variant("s", "sts" + uuid.uuid4().hex),
+                                      })
         self.session = created["session_handle"]
         shortcut = [("capture", {
             "description": GLib.Variant("s", "Hold to capture with Screen to Search"),

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -19,7 +20,9 @@ assert "org.freedesktop.portal.Screenshot" in xml, "Screenshot portal unavailabl
 assert "org.freedesktop.portal.GlobalShortcuts" in xml, "Global Shortcuts portal unavailable"
 
 created = portal.request("org.freedesktop.portal.GlobalShortcuts", "CreateSession",
-                         "(a{sv})", (), 20)
+                         "(a{sv})", (), 20, {
+                             "session_handle_token": GLib.Variant("s", "sts" + uuid.uuid4().hex),
+                         })
 session = created.get("session_handle")
 assert session and session.startswith("/org/freedesktop/portal/desktop/session/"), created
 portal.bus.call_sync(PORTAL_NAME, session, "org.freedesktop.portal.Session", "Close",
