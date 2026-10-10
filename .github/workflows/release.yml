@@ -1,0 +1,54 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore packages
+        run: dotnet restore 'src/ScreenToSearch/ScreenToSearch.csproj' --configfile NuGet.Config -r win-x64
+      - name: Publish Windows app
+        run: dotnet publish 'src/ScreenToSearch/ScreenToSearch.csproj' -c Release -r win-x64 --self-contained true --no-restore -o publish
+      - name: Verify packaged OCR and selection
+        shell: pwsh
+        run: |
+          dotnet publish/ScreenToSearch.dll --stage2-selftest stage2-report.json
+          if ($LASTEXITCODE -ne 0) { throw "Stage-two self-test exited with $LASTEXITCODE" }
+          $report = Get-Content stage2-report.json -Raw | ConvertFrom-Json
+          if ($report.passed -ne $true) { throw "Stage-two self-test failed: $($report.error)" }
+      - name: Package release
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/* -DestinationPath ScreenToSearch-win-x64.zip
+          $hash = (Get-FileHash ScreenToSearch-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ScreenToSearch-win-x64.zip" | Set-Content -Encoding ascii SHA256SUMS.txt
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "release-notes/$env:GITHUB_REF_NAME.md"
+          gh release view $env:GITHUB_REF_NAME --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip SHA256SUMS.txt --clobber
+            if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed with $LASTEXITCODE" }
+            if (Test-Path $notes) {
+              gh release edit $env:GITHUB_REF_NAME --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes
+            }
+          } elseif (Test-Path $notes) {
+            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes --verify-tag
+          } else {
+            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --generate-notes --verify-tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release publication failed with $LASTEXITCODE" }

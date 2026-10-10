@@ -1,0 +1,41 @@
+<Window x:Class="screen_to_search.StageZeroWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Stage 0 — capture and OCR lab" Width="1180" Height="780"
+        MinWidth="850" MinHeight="550" Background="#F7F8FC" FontFamily="Segoe UI">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <WrapPanel Margin="0,0,0,12">
+            <Button Content="Capture active monitor + OCR" Click="CaptureClicked" Padding="12,7" Margin="0,0,8,0"/>
+            <Button Content="Open JPG/PNG + OCR" Click="OpenImageClicked" Padding="12,7" Margin="0,0,8,0"/>
+            <Button Content="Test overlay exclusion" Click="ProbeClicked" Padding="12,7" Margin="0,0,8,0"/>
+        </WrapPanel>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="*" MinWidth="250"/>
+            </Grid.ColumnDefinitions>
+            <Border BorderBrush="#CAD0DE" BorderThickness="1" Background="#E8EBF2" Margin="0,0,12,0">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <Grid x:Name="ImageGrid" HorizontalAlignment="Left" VerticalAlignment="Top">
+                        <Image x:Name="SnapshotImage" Stretch="Fill"/>
+                        <Canvas x:Name="OcrCanvas" IsHitTestVisible="True"/>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="Capture details" FontWeight="SemiBold" FontSize="17"/>
+                <TextBlock x:Name="MonitorDetails" Margin="0,8,0,15" TextWrapping="Wrap" Foreground="#525B70"/>
+                <TextBlock Text="Recognized text" FontWeight="SemiBold" FontSize="17"/>
+                <TextBox x:Name="RecognizedText" Margin="0,8,0,15" Height="200" IsReadOnly="True"
+                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="8"/>
+            </StackPanel>
+        </Grid>
+        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,12,0,0" TextWrapping="Wrap"
+                   Text="Ready. Capture a monitor or load a JPG with text."/>
+    </Grid>
+</Window>

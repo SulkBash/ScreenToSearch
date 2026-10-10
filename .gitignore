@@ -1,0 +1,16 @@
+bin/
+obj/
+.dotnet/
+.appdata/
+.packages/
+publish/
+publish-*/
+release-artifacts/
+*-report.json
+ocr-test.png
+*.obj
+*.user
+*.suo
+.vs/
+.idea/
+*.log

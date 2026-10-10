@@ -1,0 +1,15 @@
+<Window x:Class="screen_to_search.RegionOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="#66000000"
+        Topmost="True" ShowInTaskbar="False" Cursor="Cross"
+        MouseLeftButtonDown="OnMouseDown" MouseMove="OnMouseMove"
+        MouseLeftButtonUp="OnMouseUp" KeyDown="OnKeyDown">
+    <Canvas x:Name="Surface">
+        <Border x:Name="Selection" Visibility="Collapsed" BorderBrush="White"
+                BorderThickness="2" Background="#44FFFFFF"/>
+        <Border Canvas.Left="18" Canvas.Top="18" Background="#DD202638" CornerRadius="7" Padding="12,8">
+            <TextBlock Foreground="White" Text="Drag around text • Esc to cancel"/>
+        </Border>
+    </Canvas>
+</Window>
