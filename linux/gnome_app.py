@@ -33,13 +33,14 @@ PORTAL_PATH = "/org/freedesktop/portal/desktop"
 class Portal:
     def __init__(self):
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.registration_error = None
         try:
             self.bus.call_sync(PORTAL_NAME, PORTAL_PATH, "org.freedesktop.host.portal.Registry",
                                "Register", GLib.Variant("(sa{sv})", (APP_ID, {})), None,
                                Gio.DBusCallFlags.NONE, 5000, None)
-        except GLib.Error:
+        except GLib.Error as exc:
             # Older portals may infer the application ID from the desktop launcher.
-            pass
+            self.registration_error = str(exc)
 
     def proxy(self, interface):
         return Gio.DBusProxy.new_sync(self.bus, Gio.DBusProxyFlags.NONE, None,

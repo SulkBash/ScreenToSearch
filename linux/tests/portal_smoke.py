@@ -10,6 +10,7 @@ from gi.repository import Gio, GLib
 
 
 portal = Portal()
+assert portal.registration_error is None, f"App ID registration failed: {portal.registration_error}"
 xml = portal.bus.call_sync(
     PORTAL_NAME, PORTAL_PATH, "org.freedesktop.DBus.Introspectable", "Introspect",
     None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 15000, None,

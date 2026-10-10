@@ -49,4 +49,6 @@ jobs:
         run: |
           export XDG_RUNTIME_DIR="$(mktemp -d)"
           chmod 700 "$XDG_RUNTIME_DIR"
+          export XDG_DATA_HOME="$(mktemp -d)"
+          /usr/bin/python3 linux/screen_to_search.py --install-gnome
           dbus-run-session -- bash linux/tests/run_portal_smoke.sh
