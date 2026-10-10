@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export XDG_RUNTIME_DIR="$(mktemp -d)"
-chmod 700 "$XDG_RUNTIME_DIR"
-export XDG_CURRENT_DESKTOP=GNOME
-export XDG_SESSION_TYPE=wayland
-export GDK_BACKEND=wayland
-export LIBGL_ALWAYS_SOFTWARE=1
-export WAYLAND_DISPLAY=wayland-sts
+: "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR must be set before starting D-Bus}"
+: "${WAYLAND_DISPLAY:?WAYLAND_DISPLAY must be set before starting D-Bus}"
 
 gnome-shell --wayland --headless --virtual-monitor=1280x800 \
   --wayland-display="$WAYLAND_DISPLAY" >gnome-shell.log 2>&1 &
