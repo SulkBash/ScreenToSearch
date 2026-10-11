@@ -12,6 +12,23 @@ internal static class StageZeroSelfTest
         var results = new Dictionary<string, object?>();
         try
         {
+            using (var rawKeyboard = new RawKeyboardListener((_, _) => { }))
+                results["rawKeyboardRegistered"] = true;
+            var fallbackHook = new KeyboardHook(new ShortcutBinding(0x14, ShortcutModifiers.None));
+            var keyPresses = 0;
+            var keyReleases = 0;
+            fallbackHook.Pressed += () => keyPresses++;
+            fallbackHook.Released += () => keyReleases++;
+            fallbackHook.OnRawKey(0x14, true);
+            fallbackHook.OnRawKey(0x14, true); // A held key must not start twice.
+            if (!fallbackHook.IsHeld || keyPresses != 1)
+                throw new InvalidOperationException("Raw keyboard press was not tracked.");
+            fallbackHook.MarkLongHold();
+            fallbackHook.OnRawKey(0x14, false);
+            if (fallbackHook.IsHeld || keyReleases != 1)
+                throw new InvalidOperationException("Raw keyboard release was not tracked.");
+            results["rawKeyboardHold"] = true;
+
             var capture = new MonitorCaptureService();
             var monitors = capture.GetMonitors();
             results["monitors"] = monitors.Select(m => new
