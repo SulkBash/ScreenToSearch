@@ -101,6 +101,20 @@ Click **Capture region**, select an area using your desktop's capture tool, then
 
 On other desktops, bind `python3 /absolute/path/to/linux/screen_to_search.py --capture` as a custom keyboard shortcut in your desktop's settings to launch directly into region selection. The region-selection window currently lacks the Wayland resident indicator, hold shortcut, and word-level overlay.
 
+## macOS
+
+The native macOS menu bar app requires macOS 14 or newer. It captures each display with ScreenCaptureKit, uses the bundled PP-OCRv6 models for word selection, and offers Smart, Text, Rectangle, and Lasso modes. Copy text or an image, search, and translate from the fullscreen overlay. The hold shortcut defaults to **Control+Option+Space**; the menu bar icon lets you change it to F8, F9, F10, or Caps Lock and adjust the hold duration.
+
+To build a `.app` from source on a Mac, install Xcode command line tools and Python 3, then run from the repository root:
+
+```sh
+python3 -m pip install rapidocr onnxruntime pyinstaller
+sh macos/build-app.sh
+open 'macos/dist/Screen to Search.app'
+```
+
+The build script bundles the Python OCR helper and v6 models inside the app. macOS asks for **Input Monitoring** to use the global hold shortcut and **Screen & System Audio Recording** to capture the display. If you decline Input Monitoring, **Capture now** remains available from the menu bar icon. The menu also controls search engine, translation language, and start at login.
+
 ## Privacy and limitations
 
 Screen capture and text recognition happen locally. The app doesn't upload screenshots. **Search text** and **Translate** open your browser with the selected text when you choose those actions.
