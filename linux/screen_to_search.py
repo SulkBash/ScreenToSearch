@@ -20,7 +20,8 @@ from v6_ocr import available as ocr_available, recognize_text
 
 
 DEFAULTS = {"search_engine": "google", "translation_language": "en",
-            "hold_milliseconds": 350, "shortcut_enabled": True, "launch_at_sign_in": False}
+            "hold_milliseconds": 350, "shortcut_enabled": True, "launch_at_sign_in": False,
+            "x11_shortcut": "F8"}
 APP_ID = "org.screentosearch.ScreenToSearch"
 
 
@@ -63,6 +64,8 @@ def load_settings():
                 settings[key] = saved[key].strip()
     if settings["search_engine"] not in SEARCH_URLS:
         settings["search_engine"] = DEFAULTS["search_engine"]
+    if settings["x11_shortcut"] not in ("F8", "F9", "F10"):
+        settings["x11_shortcut"] = "F8"
     return settings
 
 
@@ -77,7 +80,8 @@ def install_desktop():
     app_dir = base / "screen-to-search"
     app_dir.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent
-    for name in ("screen_to_search.py", "wayland_app.py", "word_selection.py", "v6_ocr.py"):
+    for name in ("screen_to_search.py", "wayland_app.py", "desktop_backends.py",
+                 "word_selection.py", "v6_ocr.py"):
         if (source / name).resolve() != (app_dir / name).resolve():
             shutil.copy2(source / name, app_dir / name)
     from v6_ocr import model_dir
@@ -105,7 +109,7 @@ def install_desktop():
                        + "Exec=" + quoted_launcher + "\nIcon=" + str(icon) + "\nTerminal=false\n"
                        + "Categories=Utility;Graphics;\n", encoding="utf-8")
     print(f"Installed desktop launcher: {desktop}")
-    print("Launch Screen to Search from your desktop's app launcher to approve its global shortcut.")
+    print("Launch Screen to Search from your desktop's app launcher.")
 
 
 def autostart_path():
@@ -227,68 +231,57 @@ def open_text(kind, text, settings):
 
 
 def check_dependencies():
-    desktop = wayland_desktop()
-    if desktop:
-        ready = ocr_available()
-        print(f"Display: {desktop} Wayland")
-        print("Screenshot and shortcut: XDG desktop portals")
-        print("OCR: PP-OCRv6" if ready else "OCR: missing rapidocr, onnxruntime, or v6 models")
-        try:
-            print("Clipboard:", clipboard_command()[0])
-        except RuntimeError:
-            print("Clipboard: missing")
-            ready = False
-        try:
-            import cairo  # noqa: F401
-            import gi
-            gi.require_foreign("cairo")
-            gi.require_version("Gtk", "3.0")
-            from gi.repository import Gio, GLib, Gtk  # noqa: F401
-            print("GUI: GTK 3 / PyGObject / Cairo")
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            introspection = bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
-                                          "org.freedesktop.DBus.Introspectable", "Introspect", None,
-                                          GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
-            for name in ("Screenshot", "GlobalShortcuts"):
-                present = "org.freedesktop.portal." + name in introspection
-                print(f"{name} portal:", "available" if present else "missing")
-                ready = ready and present
-            indicator = False
-            for name in ("AyatanaAppIndicator3", "AppIndicator3"):
-                try:
-                    gi.require_version(name, "0.1")
-                    importlib.import_module("gi.repository." + name)
-                    indicator = True
-                    break
-                except (ImportError, ValueError):
-                    pass
-            print("Panel indicator library:", "available" if indicator else "missing")
-            ready = ready and indicator
-        except (ImportError, ValueError):
-            print("GUI: missing python3-gi, python3-cairo, or GTK 3")
-            ready = False
-        except GLib.Error as exc:
-            print("Desktop portal unavailable:", exc.message)
-            ready = False
-        return 0 if ready else 1
-    methods = available_capture_methods()
-    ready = bool(methods)
+    from desktop_backends import available_fullscreen_commands
+    ready = ocr_available()
     print("Display:", "Wayland" if os.environ.get("WAYLAND_DISPLAY") else "X11")
-    print("Region capture:", ", ".join(methods) or "missing")
-    ocr = ocr_available()
-    print("OCR: PP-OCRv6" if ocr else "OCR: missing rapidocr, onnxruntime, or v6 models")
-    ready = ready and ocr
+    print("Full-screen capture tools:", ", ".join(name for name, _ in available_fullscreen_commands()) or "none")
+    print("OCR: PP-OCRv6" if ready else "OCR: missing rapidocr, onnxruntime, or v6 models")
     try:
         print("Clipboard:", clipboard_command()[0])
     except RuntimeError:
         print("Clipboard: missing")
         ready = False
     try:
-        import tkinter  # noqa: F401
-        print("GUI: tkinter")
-    except ImportError:
-        print("GUI: missing python3-tk")
-        return 1
+        import cairo  # noqa: F401
+        import gi
+        gi.require_foreign("cairo")
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gio, GLib, Gtk  # noqa: F401
+        print("GUI: GTK 3 / PyGObject / Cairo")
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            introspection = bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                                          "org.freedesktop.DBus.Introspectable", "Introspect", None,
+                                          GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
+        except GLib.Error:
+            introspection = ""
+        screenshot_portal = "org.freedesktop.portal.Screenshot" in introspection
+        shortcut_portal = "org.freedesktop.portal.GlobalShortcuts" in introspection
+        print("Screenshot portal:", "available" if screenshot_portal else "missing")
+        print("Global Shortcuts portal:", "available" if shortcut_portal else "missing")
+        ready = ready and (screenshot_portal or bool(available_fullscreen_commands()))
+        if os.environ.get("WAYLAND_DISPLAY"):
+            print("Hold shortcut:", "portal" if shortcut_portal else "compositor press/release bindings")
+        else:
+            try:
+                import Xlib  # noqa: F401
+                print("Hold shortcut: X11 key grab")
+            except ImportError:
+                print("Hold shortcut: missing python3-xlib")
+                ready = False
+        indicator = False
+        for name in ("AyatanaAppIndicator3", "AppIndicator3"):
+            try:
+                gi.require_version(name, "0.1")
+                importlib.import_module("gi.repository." + name)
+                indicator = True
+                break
+            except (ImportError, ValueError):
+                pass
+        print("Panel indicator:", "available" if indicator else "unavailable; reopen Settings from launcher")
+    except (ImportError, ValueError):
+        print("GUI: missing python3-gi, python3-cairo, or GTK 3")
+        ready = False
     return 0 if ready else 1
 
 
@@ -404,7 +397,12 @@ def run_gui(capture_now):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Screen to Search for Linux")
-    parser.add_argument("--capture", action="store_true", help="capture a region immediately")
+    parser.add_argument("--capture", action="store_true", help="open the full-screen capture overlay")
+    events = parser.add_mutually_exclusive_group()
+    events.add_argument("--shortcut-pressed", action="store_true",
+                        help="send a compositor shortcut press to the running app")
+    events.add_argument("--shortcut-released", action="store_true",
+                        help="send a compositor shortcut release to the running app")
     parser.add_argument("--check", action="store_true", help="show installed Linux dependencies")
     parser.add_argument("--install-desktop", "--install-gnome", action="store_true",
                         help="install a GNOME or KDE Plasma launcher for portal permissions")
@@ -415,11 +413,17 @@ def main(argv=None):
     if args.check:
         return check_dependencies()
     try:
-        if wayland_desktop():
-            from wayland_app import run
-            run(args.capture)
-        else:
+        try:
+            from wayland_app import run, send_command
+        except ImportError:
+            if args.shortcut_pressed or args.shortcut_released:
+                raise RuntimeError("GTK 3 and PyGObject are required for compositor shortcut bindings.")
             run_gui(args.capture)
+            return 0
+        if args.shortcut_pressed or args.shortcut_released:
+            send_command("press" if args.shortcut_pressed else "release")
+        else:
+            run(args.capture)
     except (RuntimeError, ImportError) as exc:
         print(f"Screen to Search: {exc}", file=sys.stderr)
         return 1

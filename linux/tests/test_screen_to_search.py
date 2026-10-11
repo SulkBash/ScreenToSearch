@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import screen_to_search as app
+import desktop_backends
 from word_selection import Word, bounds_for_indices, monitor_crops, text_for_indices
 import v6_ocr
 
@@ -61,6 +62,40 @@ class LinuxAppTests(unittest.TestCase):
         with patch.dict(os.environ, {"WAYLAND_DISPLAY": ""}), \
              patch.object(app.shutil, "which", side_effect=lambda name: name if name in tools else None):
             self.assertEqual(app.available_capture_methods(), ["maim", "flameshot", "spectacle"])
+
+    def test_fullscreen_capture_uses_x11_tool_before_portal(self):
+        class Portal:
+            def has_interface(self, _name):
+                return True
+
+            def screenshot(self):
+                self.fail("X11 should use direct capture")
+
+        def run(command, **_kwargs):
+            Path(command[-1]).write_bytes(b"image")
+            return app.subprocess.CompletedProcess(command, 0, b"", b"")
+
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": ""}), \
+             patch.object(desktop_backends, "available_fullscreen_commands",
+                          return_value=[("maim", ["maim", "{path}"])]), \
+             patch.object(desktop_backends.subprocess, "run", side_effect=run):
+            path, owned = desktop_backends.capture_fullscreen(Portal())
+        self.assertTrue(owned)
+        self.assertEqual(path.read_bytes(), b"image")
+        path.unlink()
+
+    def test_wayland_fullscreen_capture_uses_portal(self):
+        class Portal:
+            def has_interface(self, name):
+                return name == "Screenshot"
+
+            def screenshot(self):
+                return Path("/portal/capture.png")
+
+        with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}), \
+             patch.object(desktop_backends, "available_fullscreen_commands", return_value=[]):
+            self.assertEqual(desktop_backends.capture_fullscreen(Portal()),
+                             (Path("/portal/capture.png"), False))
 
     def test_capture_uses_slurp_geometry_without_shell(self):
         calls = []

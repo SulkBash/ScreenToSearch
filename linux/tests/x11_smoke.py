@@ -1,0 +1,52 @@
+"""Exercise the X11 hold shortcut, full-screen capture, and shared overlay."""
+
+from pathlib import Path
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from Xlib import X, XK, display
+from Xlib.ext import xtest
+from gi.repository import GdkPixbuf, Gtk
+
+from desktop_backends import X11Shortcut, capture_fullscreen
+from wayland_app import CaptureOverlay
+
+
+class Host:
+    def overlay_closed(self, _overlay):
+        pass
+
+
+path, owned = capture_fullscreen()
+try:
+    pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(path))
+    assert pixbuf.get_width() > 0 and pixbuf.get_height() > 0
+    overlay = CaptureOverlay(Host(), pixbuf, [], None)
+    overlay.show_all()
+    while Gtk.events_pending():
+        Gtk.main_iteration_do(False)
+    assert overlay.get_realized()
+    overlay.destroy()
+finally:
+    if owned:
+        path.unlink(missing_ok=True)
+
+events = []
+shortcut = X11Shortcut(lambda: events.append("press"), lambda: events.append("release"))
+shortcut.start()
+sender = display.Display()
+code = sender.keysym_to_keycode(XK.string_to_keysym("F8"))
+for kind in (X.KeyPress, X.KeyRelease):
+    xtest.fake_input(sender, kind, code)
+    sender.sync()
+    deadline = time.monotonic() + 3
+    while len(events) < (1 if kind == X.KeyPress else 2) and time.monotonic() < deadline:
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+        time.sleep(0.01)
+assert events == ["press", "release"], events
+shortcut.stop()
+sender.close()
+print("X11 shortcut, full-screen capture, and shared overlay passed")
