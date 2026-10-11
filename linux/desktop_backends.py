@@ -4,10 +4,29 @@ import os
 from pathlib import Path
 import select
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
 import time
+
+
+def runtime_paths():
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
+    basename = f"screen-to-search-{os.getuid()}"
+    return runtime / (basename + ".lock"), runtime / (basename + ".sock")
+
+
+def send_command(command):
+    if command not in ("capture", "settings", "press", "release"):
+        raise ValueError("Unknown Screen to Search command.")
+    _, socket_path = runtime_paths()
+    try:
+        with socket.socket(socket.AF_UNIX) as client:
+            client.connect(str(socket_path))
+            client.sendall(command.encode("ascii"))
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        raise RuntimeError("Start Screen to Search before using a compositor shortcut.") from exc
 
 
 def fullscreen_commands():
@@ -82,6 +101,7 @@ class X11Shortcut:
         self.root = None
         self.keycode = None
         self.stopping = threading.Event()
+        self.thread = None
 
     def start(self):
         from Xlib import X, XK, display
@@ -121,10 +141,14 @@ class X11Shortcut:
                 except Exception:
                     break
 
-        threading.Thread(target=listen, daemon=True).start()
+        self.thread = threading.Thread(target=listen, daemon=True)
+        self.thread.start()
 
     def stop(self):
         self.stopping.set()
+        if self.thread is not None:
+            self.thread.join(timeout=0.5)
+            self.thread = None
         if self.display is not None:
             from Xlib import X
             try:

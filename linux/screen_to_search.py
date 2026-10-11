@@ -413,17 +413,16 @@ def main(argv=None):
     if args.check:
         return check_dependencies()
     try:
+        if args.shortcut_pressed or args.shortcut_released:
+            from desktop_backends import send_command
+            send_command("press" if args.shortcut_pressed else "release")
+            return 0
         try:
-            from wayland_app import run, send_command
+            from wayland_app import run
         except ImportError:
-            if args.shortcut_pressed or args.shortcut_released:
-                raise RuntimeError("GTK 3 and PyGObject are required for compositor shortcut bindings.")
             run_gui(args.capture)
             return 0
-        if args.shortcut_pressed or args.shortcut_released:
-            send_command("press" if args.shortcut_pressed else "release")
-        else:
-            run(args.capture)
+        run(args.capture)
     except (RuntimeError, ImportError) as exc:
         print(f"Screen to Search: {exc}", file=sys.stderr)
         return 1

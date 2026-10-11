@@ -1,7 +1,10 @@
 """Exercise the X11 hold shortcut, full-screen capture, and shared overlay."""
 
 from pathlib import Path
+import os
+import socket
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,7 +13,7 @@ from Xlib import X, XK, display
 from Xlib.ext import xtest
 from gi.repository import GdkPixbuf, Gtk
 
-from desktop_backends import X11Shortcut, capture_fullscreen
+from desktop_backends import X11Shortcut, capture_fullscreen, runtime_paths, send_command
 from wayland_app import CaptureOverlay
 
 
@@ -49,4 +52,16 @@ for kind in (X.KeyPress, X.KeyRelease):
 assert events == ["press", "release"], events
 shortcut.stop()
 sender.close()
-print("X11 shortcut, full-screen capture, and shared overlay passed")
+with tempfile.TemporaryDirectory() as runtime:
+    os.environ["XDG_RUNTIME_DIR"] = runtime
+    _, socket_path = runtime_paths()
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind(str(socket_path))
+        server.listen(1)
+        send_command("press")
+        with server.accept()[0] as connection:
+            assert connection.recv(32) == b"press"
+        send_command("release")
+        with server.accept()[0] as connection:
+            assert connection.recv(32) == b"release"
+print("X11 shortcut, full-screen capture, shared overlay, and compositor commands passed")

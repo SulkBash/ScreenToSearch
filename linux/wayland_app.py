@@ -4,9 +4,7 @@ import importlib
 import io
 import os
 from pathlib import Path
-import socket
 import subprocess
-import tempfile
 import threading
 import time
 from urllib.parse import unquote, urlparse
@@ -22,7 +20,8 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 from screen_to_search import (APP_ID, SEARCH_URLS, autostart_path, copy_data, load_settings,
                               open_text, save_settings, set_autostart, wayland_desktop)
-from desktop_backends import ExternalShortcut, X11Shortcut, capture_fullscreen
+from desktop_backends import (ExternalShortcut, X11Shortcut, capture_fullscreen,
+                              runtime_paths, send_command)
 from v6_ocr import recognize_text, recognize_words
 from word_selection import Word, bounds_for_indices, monitor_crops, text_for_indices
 
@@ -891,26 +890,9 @@ class WaylandHost:
         Gtk.main_quit()
 
 
-def runtime_paths():
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
-    basename = f"screen-to-search-{os.getuid()}"
-    return runtime / (basename + ".lock"), runtime / (basename + ".sock")
-
-
-def send_command(command):
-    if command not in ("capture", "settings", "press", "release"):
-        raise ValueError("Unknown Screen to Search command.")
-    _, socket_path = runtime_paths()
-    try:
-        with socket.socket(socket.AF_UNIX) as client:
-            client.connect(str(socket_path))
-            client.sendall(command.encode("ascii"))
-    except (FileNotFoundError, ConnectionRefusedError) as exc:
-        raise RuntimeError("Start Screen to Search before using a compositor shortcut.") from exc
-
-
 def run(capture_now=False):
     import fcntl
+    import socket
 
     lock_path, socket_path = runtime_paths()
     with lock_path.open("a+b") as lock:
