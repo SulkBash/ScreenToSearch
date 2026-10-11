@@ -1,8 +1,13 @@
 import AppKit
 import CoreGraphics
 import ScreenCaptureKit
+import ServiceManagement
 
 private let shortcutKeys: [(String, Int64)] = [("F8", 100), ("F9", 101), ("F10", 109), ("Caps Lock", 57)]
+private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"),
+    ("French", "fr"), ("German", "de"), ("Portuguese", "pt"), ("Italian", "it"),
+    ("Japanese", "ja"), ("Korean", "ko"), ("Chinese (Simplified)", "zh-CN"),
+    ("Arabic", "ar"), ("Hindi", "hi"), ("Russian", "ru")]
 
 @MainActor final class MacHost: NSObject, NSApplicationDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -66,6 +71,21 @@ private let shortcutKeys: [(String, Int64)] = [("F8", 100), ("F9", 101), ("F10",
         }
         engine.submenu = engineMenu
         menu.addItem(engine)
+        let translation = NSMenuItem(title: "Translate to", action: nil, keyEquivalent: "")
+        let translationMenu = NSMenu()
+        for (name, code) in languages {
+            let item = NSMenuItem(title: name, action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = code
+            item.state = (UserDefaults.standard.string(forKey: "translationLanguage") ?? "en") == code ? .on : .off
+            translationMenu.addItem(item)
+        }
+        translation.submenu = translationMenu
+        menu.addItem(translation)
+        let startup = NSMenuItem(title: "Start at login", action: #selector(toggleStartup(_:)), keyEquivalent: "")
+        startup.target = self
+        startup.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(startup)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -85,6 +105,24 @@ private let shortcutKeys: [(String, Int64)] = [("F8", 100), ("F9", 101), ("F10",
 
     @objc private func selectEngine(_ sender: NSMenuItem) {
         UserDefaults.standard.set(sender.representedObject as? String, forKey: "searchEngine")
+        buildMenu()
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.representedObject as? String, forKey: "translationLanguage")
+        buildMenu()
+    }
+
+    @objc private func toggleStartup(_ sender: NSMenuItem) {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            showError("Start at login: \(error.localizedDescription)")
+        }
         buildMenu()
     }
 
@@ -194,18 +232,23 @@ private let shortcutKeys: [(String, Int64)] = [("F8", 100), ("F9", 101), ("F10",
         case .search, .translate:
             let text = surface.selectedText
             guard !text.isEmpty else { showError("Select text first."); return }
-            let escaped = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            let base: String
+            var components: URLComponents
             if action == .translate {
-                base = "https://translate.google.com/?sl=auto&tl=en&text=\(escaped)&op=translate"
+                let language = UserDefaults.standard.string(forKey: "translationLanguage") ?? "en"
+                components = URLComponents(string: "https://translate.google.com/")!
+                components.queryItems = [URLQueryItem(name: "sl", value: "auto"),
+                                         URLQueryItem(name: "tl", value: language),
+                                         URLQueryItem(name: "text", value: text),
+                                         URLQueryItem(name: "op", value: "translate")]
             } else {
                 switch UserDefaults.standard.string(forKey: "searchEngine") ?? "Google" {
-                case "Bing": base = "https://www.bing.com/search?q=\(escaped)"
-                case "DuckDuckGo": base = "https://duckduckgo.com/?q=\(escaped)"
-                default: base = "https://www.google.com/search?q=\(escaped)"
+                case "Bing": components = URLComponents(string: "https://www.bing.com/search")!
+                case "DuckDuckGo": components = URLComponents(string: "https://duckduckgo.com/")!
+                default: components = URLComponents(string: "https://www.google.com/search")!
                 }
+                components.queryItems = [URLQueryItem(name: "q", value: text)]
             }
-            if let url = URL(string: base) { NSWorkspace.shared.open(url) }
+            if let url = components.url { NSWorkspace.shared.open(url) }
         }
         dismissOverlays()
     }

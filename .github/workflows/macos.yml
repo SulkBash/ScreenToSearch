@@ -8,7 +8,14 @@ on:
 
 jobs:
   macos:
-    runs-on: macos-15
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -25,8 +32,8 @@ jobs:
       - name: Recognize text with packaged macOS helper
         run: python macos/tests/smoke_ocr.py
       - name: Package macOS app
-        run: ditto -c -k --sequesterRsrc --keepParent macos/dist/'Screen to Search.app' ScreenToSearch-macos.zip
+        run: ditto -c -k --sequesterRsrc --keepParent macos/dist/'Screen to Search.app' ScreenToSearch-macos-${{ matrix.arch }}.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: ScreenToSearch-macos
-          path: ScreenToSearch-macos.zip
+          name: ScreenToSearch-macos-${{ matrix.arch }}
+          path: ScreenToSearch-macos-${{ matrix.arch }}.zip
