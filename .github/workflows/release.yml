@@ -22,16 +22,19 @@ jobs:
       - name: Restore packages
         run: dotnet restore 'src/ScreenToSearch/ScreenToSearch.csproj' --configfile NuGet.Config -r win-x64
       - name: Publish Windows app
-        run: dotnet publish 'src/ScreenToSearch/ScreenToSearch.csproj' -c Release -r win-x64 --self-contained true --no-restore -o publish
+        run: dotnet publish 'src/ScreenToSearch/ScreenToSearch.csproj' -c Release -r win-x64 --self-contained true --no-restore -o publish -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:DebugSymbols=false
       - name: Verify packaged OCR and selection
         shell: pwsh
         run: |
+          Remove-Item publish/*.lib -ErrorAction SilentlyContinue
+          $files = @(Get-ChildItem publish -Recurse -File)
+          if ($files.Count -gt 10) { throw "Windows package is not compact: $($files.Count) files" }
           if (Test-Path publish/models/v5) { throw "Obsolete v5 OCR models are present" }
           foreach ($name in 'PP-OCRv6_det_small.onnx', 'PP-OCRv6_rec_small.onnx', 'ppocrv6_small_dict.txt') {
             if (!(Test-Path "publish/models/v6/$name")) { throw "Missing v6 OCR model: $name" }
           }
-          dotnet publish/ScreenToSearch.dll --stage2-selftest stage2-report.json
-          if ($LASTEXITCODE -ne 0) { throw "Stage-two self-test exited with $LASTEXITCODE" }
+          $test = Start-Process -FilePath (Resolve-Path publish/ScreenToSearch.exe) -ArgumentList '--stage2-selftest', 'stage2-report.json' -Wait -PassThru -WindowStyle Hidden
+          if ($test.ExitCode -ne 0) { throw "Stage-two self-test exited with $($test.ExitCode)" }
           $report = Get-Content stage2-report.json -Raw | ConvertFrom-Json
           if ($report.passed -ne $true) { throw "Stage-two self-test failed: $($report.error)" }
       - name: Package release
