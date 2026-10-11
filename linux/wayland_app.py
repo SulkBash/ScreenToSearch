@@ -1,12 +1,10 @@
-"""GNOME and KDE Plasma Wayland host: portal shortcut, indicator, and OCR overlay."""
+"""Linux GTK host: desktop shortcut, full-screen capture, and OCR overlay."""
 
 import importlib
 import io
 import os
 from pathlib import Path
-import socket
 import subprocess
-import tempfile
 import threading
 import time
 from urllib.parse import unquote, urlparse
@@ -22,6 +20,8 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 from screen_to_search import (APP_ID, SEARCH_URLS, autostart_path, copy_data, load_settings,
                               open_text, save_settings, set_autostart, wayland_desktop)
+from desktop_backends import (ExternalShortcut, X11Shortcut, capture_fullscreen,
+                              runtime_paths, send_command)
 from v6_ocr import recognize_text, recognize_words
 from word_selection import Word, bounds_for_indices, monitor_crops, text_for_indices
 
@@ -45,6 +45,16 @@ class Portal:
     def proxy(self, interface):
         return Gio.DBusProxy.new_sync(self.bus, Gio.DBusProxyFlags.NONE, None,
                                       PORTAL_NAME, PORTAL_PATH, interface, None)
+
+    def has_interface(self, name):
+        try:
+            value = self.bus.call_sync(PORTAL_NAME, PORTAL_PATH,
+                                       "org.freedesktop.DBus.Introspectable", "Introspect", None,
+                                       GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 5000,
+                                       None).unpack()[0]
+            return "org.freedesktop.portal." + name in value
+        except GLib.Error:
+            return False
 
     def request(self, interface, method, signature, values, timeout_seconds=120, extra_options=None):
         token = "sts" + uuid.uuid4().hex
@@ -589,7 +599,11 @@ class WaylandHost:
         self.settings = load_settings()
         self.settings["launch_at_sign_in"] = autostart_path().exists()
         self.settings.setdefault("hold_milliseconds", 350)
-        self.portal = Portal()
+        self.settings.setdefault("x11_shortcut", "F8")
+        try:
+            self.portal = Portal()
+        except GLib.Error:
+            self.portal = None
         self.overlays = []
         self.restore_settings_after_overlay = False
         self.hold_timer = None
@@ -613,7 +627,8 @@ class WaylandHost:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_border_width(16)
         self.window.add(box)
-        box.pack_start(Gtk.Label(label=f"Hold the {wayland_desktop()} shortcut to capture, or click Capture."),
+        desktop = wayland_desktop() or os.environ.get("XDG_CURRENT_DESKTOP") or "desktop"
+        box.pack_start(Gtk.Label(label=f"Hold the {desktop} shortcut to capture, or click Capture."),
                        False, False, 0)
         capture = Gtk.Button(label="Capture now")
         capture.connect("clicked", lambda *_: self.capture())
@@ -648,15 +663,31 @@ class WaylandHost:
         configure = Gtk.Button(label="Change shortcut…")
         configure.connect("clicked", self.configure_shortcut)
         grid.attach(configure, 1, 5, 1, 1)
+        if not os.environ.get("WAYLAND_DISPLAY"):
+            self.x11_key = Gtk.ComboBoxText()
+            for key in ("F8", "F9", "F10"):
+                self.x11_key.append_text(key)
+            self.x11_key.set_active(("F8", "F9", "F10").index(self.settings["x11_shortcut"]))
+            self.x11_key.connect("changed", self.change_x11_shortcut)
+            grid.attach(self.x11_key, 1, 5, 1, 1)
+            configure.set_no_show_all(True)
+            configure.hide()
         self.startup_toggle = Gtk.CheckButton(label="Start when I sign in")
         self.startup_toggle.set_active(self.settings["launch_at_sign_in"])
         self.startup_toggle.connect("toggled", self.toggle_autostart)
         grid.attach(self.startup_toggle, 0, 6, 2, 1)
         save = Gtk.Button(label="Save settings")
         save.connect("clicked", self.save)
-        box.pack_start(save, False, False, 0)
+        footer = Gtk.Box(spacing=8)
+        footer.pack_start(save, False, False, 0)
+        quit_button = Gtk.Button(label="Quit")
+        quit_button.connect("clicked", lambda *_: self.quit())
+        footer.pack_start(quit_button, False, False, 0)
+        box.pack_start(footer, False, False, 0)
 
     def make_indicator(self):
+        if self.portal is None:
+            return
         try:
             watcher = self.portal.bus.call_sync(
                 "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
@@ -689,10 +720,7 @@ class WaylandHost:
         self.indicator.set_status(module.IndicatorStatus.ACTIVE)
 
     def on_window_close(self, *_):
-        if self.indicator is None:
-            self.quit()
-        else:
-            self.window.hide()
+        self.window.hide()
         return True
 
     def save(self, *_):
@@ -703,9 +731,15 @@ class WaylandHost:
 
     def start_shortcut(self):
         try:
-            self.shortcut = Shortcut(self.portal, self.shortcut_pressed, self.shortcut_released)
+            if not os.environ.get("WAYLAND_DISPLAY"):
+                self.shortcut = X11Shortcut(self.shortcut_pressed, self.shortcut_released,
+                                            self.settings["x11_shortcut"])
+            elif self.portal is not None and self.portal.has_interface("GlobalShortcuts"):
+                self.shortcut = Shortcut(self.portal, self.shortcut_pressed, self.shortcut_released)
+            else:
+                self.shortcut = ExternalShortcut()
             self.shortcut.start()
-        except (RuntimeError, GLib.Error) as exc:
+        except (RuntimeError, GLib.Error, ImportError) as exc:
             if self.shortcut is not None:
                 self.shortcut.stop()
             self.shortcut = None
@@ -716,6 +750,18 @@ class WaylandHost:
             self._updating_shortcut = False
             self.window.show_all()
             self.error("Global shortcut unavailable: " + str(exc))
+
+    def change_x11_shortcut(self, widget):
+        key = widget.get_active_text()
+        if not key or key == self.settings["x11_shortcut"]:
+            return
+        if self.shortcut:
+            self.shortcut.stop()
+            self.shortcut = None
+        self.settings["x11_shortcut"] = key
+        save_settings(self.settings)
+        if self.settings["shortcut_enabled"]:
+            self.start_shortcut()
 
     def toggle_shortcut(self, widget):
         if self._updating_shortcut:
@@ -785,8 +831,10 @@ class WaylandHost:
         self.window.hide()
         while Gtk.events_pending():
             Gtk.main_iteration_do(False)
+        owned = False
+        path = None
         try:
-            path = self.portal.screenshot()
+            path, owned = capture_fullscreen(self.portal)
             pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(path))
             self.restore_settings_after_overlay = was_visible
             screen = Gdk.Screen.get_default()
@@ -812,6 +860,9 @@ class WaylandHost:
                     words = recognize_words(str(path))
                 except (RuntimeError, ImportError, OSError):
                     words = []
+                finally:
+                    if owned:
+                        path.unlink(missing_ok=True)
                 for overlay, (x, y, width, height) in zip(overlays, crops):
                     local = [Word(word.text, word.x - x, word.y - y, word.width, word.height, word.line)
                              for word in words if x <= word.x + word.width / 2 < x + width
@@ -820,6 +871,8 @@ class WaylandHost:
 
             threading.Thread(target=recognize_screen, daemon=True).start()
         except (RuntimeError, GLib.Error, OSError) as exc:
+            if owned and path is not None:
+                path.unlink(missing_ok=True)
             self.error(str(exc))
             if was_visible:
                 self.window.show_all()
@@ -844,22 +897,18 @@ class WaylandHost:
 
 def run(capture_now=False):
     import fcntl
+    import socket
 
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
-    basename = f"screen-to-search-{os.getuid()}"
-    lock_path = runtime / (basename + ".lock")
-    socket_path = runtime / (basename + ".sock")
+    lock_path, socket_path = runtime_paths()
     with lock_path.open("a+b") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             for attempt in range(10):
                 try:
-                    with socket.socket(socket.AF_UNIX) as client:
-                        client.connect(str(socket_path))
-                        client.sendall(b"capture" if capture_now else b"settings")
+                    send_command("capture" if capture_now else "settings")
                     break
-                except (FileNotFoundError, ConnectionRefusedError):
+                except RuntimeError:
                     if attempt == 9:
                         raise RuntimeError("The running Screen to Search app did not respond.")
                     time.sleep(0.1)
@@ -884,7 +933,11 @@ def run(capture_now=False):
                         break
                     with connection:
                         command = connection.recv(32)
-                    GLib.idle_add(host.capture if command == b"capture" else host.show_settings)
+                    actions = {b"capture": host.capture, b"settings": host.show_settings,
+                               b"press": host.shortcut_pressed, b"release": host.shortcut_released}
+                    if command in actions and (command not in (b"press", b"release") or
+                                               host.settings["shortcut_enabled"]):
+                        GLib.idle_add(actions[command])
 
             threading.Thread(target=accept_commands, daemon=True).start()
             try:
