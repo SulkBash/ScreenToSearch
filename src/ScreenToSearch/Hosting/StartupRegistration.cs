@@ -42,8 +42,14 @@ internal static class StartupRegistration
             return;
         }
 
-        var assembly = Assembly.GetEntryAssembly()?.Location
-            ?? throw new InvalidOperationException("Cannot find app location.");
+        var assembly = Assembly.GetEntryAssembly()?.Location;
+        if (string.IsNullOrEmpty(assembly))
+        {
+            var processPath = Environment.ProcessPath
+                ?? throw new InvalidOperationException("Cannot find app location.");
+            key.SetValue(ValueName, $"\"{processPath}\"", RegistryValueKind.String);
+            return;
+        }
         var exe = Path.ChangeExtension(assembly, ".exe");
         var command = File.Exists(exe)
             ? $"\"{exe}\""

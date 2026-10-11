@@ -45,7 +45,15 @@ dotnet publish "src/ScreenToSearch/ScreenToSearch.csproj" -c Release --self-cont
 .\publish\ScreenToSearch.exe
 ```
 
-That computer will need the .NET 10 Desktop Runtime. Keep the entire `publish` folder together, including `models`. If you're making a GitHub release, zip the **contents** of `publish`; the folder itself is generated and shouldn't be committed. Quit any older copy of the app from the tray before running a different build.
+That build needs the .NET 10 Desktop Runtime. To build the compact, self-contained Windows release package instead, run:
+
+```powershell
+dotnet restore "src/ScreenToSearch/ScreenToSearch.csproj" -r win-x64
+dotnet publish "src/ScreenToSearch/ScreenToSearch.csproj" -c Release -r win-x64 --self-contained true --no-restore -o publish -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:DebugSymbols=false
+Remove-Item publish/*.lib -ErrorAction SilentlyContinue
+```
+
+Keep the entire `publish` folder together, including `models`. For a GitHub release, zip the **contents** of `publish`; the folder itself is generated and shouldn't be committed. Quit any older copy of the app from the tray before running a different build.
 
 #### Checks for contributors
 
