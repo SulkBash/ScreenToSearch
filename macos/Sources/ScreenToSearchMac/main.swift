@@ -279,7 +279,11 @@ if CommandLine.arguments.contains("--overlay-selftest") {
         surface.selected = [0]
         precondition(surface.selectedText == "Hello", "Word selection failed")
         precondition(surface.selectedImage != nil, "Image crop failed")
-        print("macOS overlay word selection and image crop passed")
+        surface.mode = .lasso
+        surface.lasso = [CGPoint(x: 5, y: 150), CGPoint(x: 75, y: 150),
+                         CGPoint(x: 70, y: 185), CGPoint(x: 5, y: 185)]
+        precondition(surface.selectedImage?.tiffRepresentation != nil, "Lasso image mask failed")
+        print("macOS overlay word selection, image crop, and lasso mask passed")
     }
 } else if CommandLine.arguments.contains("--check") {
     let resources = OCRBridge.resources
