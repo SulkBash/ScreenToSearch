@@ -16,6 +16,7 @@ internal sealed class ResidentHost : IDisposable
     private readonly AppSettings _settings;
     private readonly MainWindow _settingsWindow;
     private readonly KeyboardHook _hook;
+    private readonly RawKeyboardListener? _rawKeyboard;
     private readonly DispatcherTimer _holdTimer;
     private readonly MonitorCaptureService _capture = new();
     private readonly CancellationTokenSource _pipeCancellation = new();
@@ -49,6 +50,8 @@ internal sealed class ResidentHost : IDisposable
             _holdTimer.Stop();
             _hook.SetShortcut(recording ? ShortcutBinding.Disabled : _settings.Shortcut);
         };
+        try { _rawKeyboard = new RawKeyboardListener(_hook.OnRawKey); }
+        catch (System.ComponentModel.Win32Exception) { /* The primary hook still works. */ }
 
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Open Screen to Search", null, (_, _) => OpenSurface());
@@ -69,7 +72,11 @@ internal sealed class ResidentHost : IDisposable
 
         SystemEvents.PowerModeChanged += PowerModeChanged;
         SystemEvents.DisplaySettingsChanged += DisplaySettingsChanged;
-        _hook.Start();
+        try { _hook.Start(); }
+        catch (System.ComponentModel.Win32Exception) when (_rawKeyboard is not null)
+        {
+            // Raw Input can still open the capture surface if a hook is unavailable.
+        }
         _ = ListenForSecondLaunchAsync();
         _ = WarmUpOcrAsync();
     }
@@ -231,6 +238,7 @@ internal sealed class ResidentHost : IDisposable
         _pipeCancellation.Cancel();
         _holdTimer.Stop();
         _hook.Dispose();
+        _rawKeyboard?.Dispose();
         CloseSurfaces();
         _tray.Visible = false;
         _tray.ContextMenuStrip?.Dispose();

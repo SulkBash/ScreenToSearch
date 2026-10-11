@@ -32,6 +32,8 @@ internal sealed class KeyboardHook : IDisposable
     private IntPtr _handle;
     private bool _held;
     private bool _longHold;
+    private bool _pressedViaHook;
+    private bool _suppressNextHookUp;
     private ShortcutBinding _shortcut;
 
     public event Action? Pressed;
@@ -67,6 +69,32 @@ internal sealed class KeyboardHook : IDisposable
     {
         _held = false;
         _longHold = false;
+        _pressedViaHook = false;
+        _suppressNextHookUp = false;
+    }
+
+    // Raw Input continues to report physical keys when a game bypasses (or Windows
+    // silently removes) the low-level hook. It cannot suppress keys in the game.
+    public void OnRawKey(uint virtualKey, bool pressed)
+    {
+        if (!_shortcut.IsEnabled || virtualKey != _shortcut.Key) return;
+        if (pressed)
+        {
+            if (_held || !ModifiersMatch()) return;
+            _held = true;
+            _longHold = false;
+            _pressedViaHook = false;
+            Pressed?.Invoke();
+        }
+        else if (_held)
+        {
+            var replay = _pressedViaHook && !_longHold;
+            var suppressed = _pressedViaHook;
+            Reset();
+            _suppressNextHookUp = suppressed;
+            if (replay) ReplayTap(_shortcut);
+            Released?.Invoke();
+        }
     }
 
     private IntPtr Callback(int code, IntPtr message, IntPtr data)
@@ -80,24 +108,32 @@ internal sealed class KeyboardHook : IDisposable
                 var id = message.ToInt32();
                 if (id is WmKeyDown or WmSysKeyDown)
                 {
-                    if (!_held && CurrentModifiers() != _shortcut.Modifiers)
+                    _suppressNextHookUp = false;
+                    if (!_held && !ModifiersMatch())
                         return CallNextHookEx(_handle, code, message, data);
                     if (!_held)
                     {
                         _held = true;
                         _longHold = false;
+                        _pressedViaHook = true;
                         Pressed?.Invoke();
                     }
-                    return (IntPtr)1;
+                    return _pressedViaHook ? (IntPtr)1 : CallNextHookEx(_handle, code, message, data);
                 }
                 if (id is WmKeyUp or WmSysKeyUp)
                 {
+                    if (_suppressNextHookUp)
+                    {
+                        _suppressNextHookUp = false;
+                        return (IntPtr)1;
+                    }
                     if (!_held) return CallNextHookEx(_handle, code, message, data);
-                    var replay = !_longHold;
+                    var replay = _pressedViaHook && !_longHold;
+                    var suppressed = _pressedViaHook;
                     Reset();
                     if (replay) ReplayTap(_shortcut);
                     Released?.Invoke();
-                    return (IntPtr)1;
+                    return suppressed ? (IntPtr)1 : CallNextHookEx(_handle, code, message, data);
                 }
             }
         }
@@ -113,6 +149,9 @@ internal sealed class KeyboardHook : IDisposable
         if (IsDown(0x5B) || IsDown(0x5C)) modifiers |= ShortcutModifiers.Windows;
         return modifiers;
     }
+
+    private bool ModifiersMatch() =>
+        (CurrentModifiers() & _shortcut.Modifiers) == _shortcut.Modifiers;
 
     private static bool IsDown(int key) => (GetAsyncKeyState(key) & 0x8000) != 0;
 
