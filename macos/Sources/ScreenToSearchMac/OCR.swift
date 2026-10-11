@@ -35,11 +35,18 @@ enum OCRBridge {
         }
         try png.write(to: temp)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        let python = ProcessInfo.processInfo.environment["SCREEN_TO_SEARCH_PYTHON"] ?? "python3"
-        process.arguments = [python, resources.appendingPathComponent("ocr_helper.py").path, temp.path]
+        let packaged = resources.appendingPathComponent("OcrHelper/OcrHelper")
+        if FileManager.default.isExecutableFile(atPath: packaged.path) {
+            process.executableURL = packaged
+            process.arguments = [temp.path]
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            let python = ProcessInfo.processInfo.environment["SCREEN_TO_SEARCH_PYTHON"] ?? "python3"
+            process.arguments = [python, resources.appendingPathComponent("ocr_helper.py").path, temp.path]
+        }
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
+        environment["SCREEN_TO_SEARCH_MODEL_DIR"] = resources.appendingPathComponent("models/v6").path
         process.environment = environment
         let output = Pipe()
         let errors = Pipe()

@@ -16,3 +16,5 @@ ocr-test.png
 *.log
 __pycache__/
 *.pyc
+macos/.build/
+macos/dist/

@@ -15,13 +15,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install PP-OCRv6 runtime
-        run: python -m pip install rapidocr onnxruntime
+        run: python -m pip install rapidocr onnxruntime pyinstaller
       - name: Recognize text with bundled models
         run: python linux/tests/ocr_smoke.py
       - name: Build macOS app
         run: sh macos/build-app.sh
       - name: Check app resources
         run: macos/dist/'Screen to Search.app'/Contents/MacOS/ScreenToSearchMac --check
+      - name: Recognize text with packaged macOS helper
+        run: python macos/tests/smoke_ocr.py
       - name: Package macOS app
         run: ditto -c -k --sequesterRsrc --keepParent macos/dist/'Screen to Search.app' ScreenToSearch-macos.zip
       - uses: actions/upload-artifact@v4

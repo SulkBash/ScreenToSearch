@@ -15,5 +15,12 @@ cp "$repo/src/ScreenToSearch/models/v6/PP-OCRv6_det_small.onnx" \
    "$repo/src/ScreenToSearch/models/v6/PP-OCRv6_rec_small.onnx" \
    "$repo/src/ScreenToSearch/models/v6/ppocrv6_small_dict.txt" \
    "$app/Contents/Resources/models/v6/"
+if python3 -m PyInstaller --version >/dev/null 2>&1; then
+  python3 -m PyInstaller --noconfirm --clean --onedir --name OcrHelper \
+    --paths "$repo/linux" --collect-all rapidocr --collect-all onnxruntime \
+    --collect-all cv2 --distpath "$app/Contents/Resources" \
+    --workpath "$repo/macos/.build/pyinstaller" --specpath "$repo/macos/.build" \
+    "$repo/macos/Resources/ocr_helper.py"
+fi
 "$app/Contents/MacOS/ScreenToSearchMac" --check
 echo "$app"

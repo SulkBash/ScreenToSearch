@@ -1,12 +1,16 @@
 """PP-OCRv6 text and word geometry for the Linux app."""
 
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from word_selection import Word, text_for_indices
 
 
 def model_dir():
+    override = os.environ.get("SCREEN_TO_SEARCH_MODEL_DIR")
+    if override:
+        return Path(override)
     here = Path(__file__).resolve().parent
     installed = here / "models" / "v6"
     source = here.parent / "src" / "ScreenToSearch" / "models" / "v6"

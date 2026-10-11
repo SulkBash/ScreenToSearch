@@ -4,7 +4,7 @@ import ScreenCaptureKit
 
 private let shortcutKeys: [(String, Int64)] = [("F8", 100), ("F9", 101), ("F10", 109), ("Caps Lock", 57)]
 
-final class MacHost: NSObject, NSApplicationDelegate {
+@MainActor final class MacHost: NSObject, NSApplicationDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
@@ -168,9 +168,9 @@ final class MacHost: NSObject, NSApplicationDelegate {
                     DispatchQueue.global(qos: .userInitiated).async {
                         do {
                             let words = try OCRBridge.recognize(image)
-                            DispatchQueue.main.async { overlay.surface.words = words }
+                            Task { @MainActor in overlay.surface.words = words }
                         } catch {
-                            DispatchQueue.main.async { self.showError("OCR: \(error.localizedDescription)") }
+                            Task { @MainActor in self.showError("OCR: \(error.localizedDescription)") }
                         }
                     }
                 }
