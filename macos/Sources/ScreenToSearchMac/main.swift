@@ -47,7 +47,7 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
         capture.target = self
         menu.addItem(capture)
 
-        let shortcut = NSMenuItem(title: "Hold shortcut", action: nil, keyEquivalent: "")
+        let shortcutItem = NSMenuItem(title: "Hold shortcut", action: nil, keyEquivalent: "")
         let shortcutMenu = NSMenu()
         for choice in shortcutKeys {
             let item = NSMenuItem(title: choice.name, action: #selector(selectShortcut(_:)), keyEquivalent: "")
@@ -56,8 +56,8 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
             item.state = shortcut.name == choice.name ? .on : .off
             shortcutMenu.addItem(item)
         }
-        shortcut.submenu = shortcutMenu
-        menu.addItem(shortcut)
+        shortcutItem.submenu = shortcutMenu
+        menu.addItem(shortcutItem)
 
         let hold = NSMenuItem(title: "Hold duration", action: nil, keyEquivalent: "")
         let holdMenu = NSMenu()
