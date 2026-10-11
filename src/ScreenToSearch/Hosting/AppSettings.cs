@@ -8,7 +8,6 @@ internal sealed class AppSettings
 {
     public string Language { get; set; } = "en";
     public string SearchEngine { get; set; } = "google";
-    public string OcrLanguage { get; set; } = "auto";
     public ShortcutBinding Shortcut { get; set; } = new(0x14, ShortcutModifiers.None);
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public HoldKey? ShortcutKey { get; set; } // Migrates settings written by earlier releases.
@@ -24,8 +23,6 @@ internal sealed class AppSettings
         try
         {
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(PathName)) ?? new();
-            if (!NeuralOcrService.SupportsLanguage(settings.OcrLanguage))
-                settings.OcrLanguage = "auto";
             if (settings.ShortcutKey is { } legacy && Enum.IsDefined(legacy))
                 settings.Shortcut = new(legacy == HoldKey.CapsLock ? 0x14u :
                     legacy == HoldKey.F8 ? 0x77u : (uint)legacy, ShortcutModifiers.None);

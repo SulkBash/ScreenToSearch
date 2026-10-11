@@ -1,4 +1,4 @@
-name: Windows release
+name: Release
 
 on:
   push:
@@ -23,6 +23,10 @@ jobs:
       - name: Verify packaged OCR and selection
         shell: pwsh
         run: |
+          if (Test-Path publish/models/v5) { throw "Obsolete v5 OCR models are present" }
+          foreach ($name in 'PP-OCRv6_det_small.onnx', 'PP-OCRv6_rec_small.onnx', 'ppocrv6_small_dict.txt') {
+            if (!(Test-Path "publish/models/v6/$name")) { throw "Missing v6 OCR model: $name" }
+          }
           dotnet publish/ScreenToSearch.dll --stage2-selftest stage2-report.json
           if ($LASTEXITCODE -ne 0) { throw "Stage-two self-test exited with $LASTEXITCODE" }
           $report = Get-Content stage2-report.json -Raw | ConvertFrom-Json
@@ -31,8 +35,15 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive -Path publish/* -DestinationPath ScreenToSearch-win-x64.zip
-          $hash = (Get-FileHash ScreenToSearch-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  ScreenToSearch-win-x64.zip" | Set-Content -Encoding ascii SHA256SUMS.txt
+          New-Item -ItemType Directory -Path linux-package/linux/models -Force | Out-Null
+          Copy-Item -Path linux/* -Destination linux-package/linux -Recurse
+          Copy-Item -Path src/ScreenToSearch/models/v6 -Destination linux-package/linux/models -Recurse
+          Copy-Item -Path README.md,LICENSE,APACHE-2.0-LICENSE.txt,THIRD_PARTY_LICENSES.txt -Destination linux-package
+          Compress-Archive -Path linux-package/* -DestinationPath ScreenToSearch-linux.zip
+          $windowsHash = (Get-FileHash ScreenToSearch-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $linuxHash = (Get-FileHash ScreenToSearch-linux.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$windowsHash  ScreenToSearch-win-x64.zip" | Set-Content -Encoding ascii SHA256SUMS.txt
+          "$linuxHash  ScreenToSearch-linux.zip" | Add-Content -Encoding ascii SHA256SUMS.txt
       - name: Publish GitHub release
         shell: pwsh
         env:
@@ -41,14 +52,14 @@ jobs:
           $notes = "release-notes/$env:GITHUB_REF_NAME.md"
           gh release view $env:GITHUB_REF_NAME --json tagName *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip SHA256SUMS.txt --clobber
+            gh release upload $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip SHA256SUMS.txt --clobber
             if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed with $LASTEXITCODE" }
             if (Test-Path $notes) {
               gh release edit $env:GITHUB_REF_NAME --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes
             }
           } elseif (Test-Path $notes) {
-            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes --verify-tag
+            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes --verify-tag
           } else {
-            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --generate-notes --verify-tag
+            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --generate-notes --verify-tag
           }
           if ($LASTEXITCODE -ne 0) { throw "GitHub release publication failed with $LASTEXITCODE" }

@@ -12,8 +12,13 @@ Model attribution and provenance:
   PaddleOCR: https://github.com/PaddlePaddle/PaddleOCR
   RapidOCR model notice: https://rapidai.github.io/RapidOCRDocs/main/en/model_licenses/
 
+The local OCR source in src/RapidOcrNetV6 is adapted from RapidOcrNet 4.2.0
+under Apache-2.0; https://github.com/BobLd/RapidOcrNet
+Its upstream license and notice are preserved in that source directory.
+The Linux app uses RapidOCR for Python under Apache-2.0:
+  https://github.com/RapidAI/RapidOCR
+
 NuGet dependencies used by the app:
-  RapidOcrNet 4.2.0 — Apache-2.0; https://github.com/BobLd/RapidOcrNet
   Clipper2 2.0.0 — Boost Software License 1.0
   Microsoft.ML.OnnxRuntime 1.29.0 — MIT
   Microsoft.ML.OnnxRuntime.Managed 1.29.0 — MIT

@@ -4,7 +4,7 @@ internal sealed class ScreenOcrPipeline
 {
     private readonly NeuralOcrService _neural = new();
 
-    public Task<OcrDocument> RecognizeAsync(byte[] image, string language,
+    public Task<OcrDocument> RecognizeAsync(byte[] image,
         CancellationToken cancellationToken = default) =>
-        _neural.RecognizeForLanguageAsync(image, language, cancellationToken, maxSide: 2048);
+        _neural.RecognizeAsync(image, cancellationToken, maxSide: 2048);
 }

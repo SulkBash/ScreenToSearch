@@ -64,7 +64,7 @@ public partial class StageZeroWindow : Window
         }
         bitmap.Freeze();
         var timer = Stopwatch.StartNew();
-        var doc = await _ocr.RecognizeAsync(image, "auto");
+        var doc = await _ocr.RecognizeAsync(image);
         var scale = Math.Min(1.0, PreviewWidth / bitmap.PixelWidth);
         var width = bitmap.PixelWidth * scale;
         var height = bitmap.PixelHeight * scale;

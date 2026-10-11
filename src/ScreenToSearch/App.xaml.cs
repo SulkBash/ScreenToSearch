@@ -37,17 +37,6 @@ public partial class App : System.Windows.Application
             Shutdown(code);
             return;
         }
-        if (e.Args.Length >= 3 && e.Args[0] == "--ocr-model-compare")
-        {
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            try { Shutdown(await OcrModelComparison.RunAsync(e.Args[1], e.Args[2])); }
-            catch (Exception ex)
-            {
-                await File.WriteAllTextAsync(e.Args[2], ex.ToString());
-                Shutdown(1);
-            }
-            return;
-        }
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _instanceMutex = new Mutex(false, @"Local\CircleToSearchForWindows.Singleton.5f238b73");
         if (!_instanceMutex.WaitOne(0))
