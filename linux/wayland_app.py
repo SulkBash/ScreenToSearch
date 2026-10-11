@@ -601,11 +601,13 @@ class WaylandHost:
         self.settings["launch_at_sign_in"] = autostart_path().exists()
         self.settings.setdefault("hold_milliseconds", 350)
         self.settings.setdefault("x11_shortcut", "F8")
-        self.portal = Portal()
+        try:
+            self.portal = Portal()
+        except GLib.Error:
+            self.portal = None
         self.overlays = []
         self.restore_settings_after_overlay = False
         self.hold_timer = None
-        self.release_timer = None
         self.shortcut = None
         self.indicator = None
         self._updating_startup = False
@@ -680,6 +682,8 @@ class WaylandHost:
         box.pack_start(save, False, False, 0)
 
     def make_indicator(self):
+        if self.portal is None:
+            return
         try:
             watcher = self.portal.bus.call_sync(
                 "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
@@ -726,7 +730,7 @@ class WaylandHost:
             if not os.environ.get("WAYLAND_DISPLAY"):
                 self.shortcut = X11Shortcut(self.shortcut_pressed, self.shortcut_released,
                                             self.settings["x11_shortcut"])
-            elif self.portal.has_interface("GlobalShortcuts"):
+            elif self.portal is not None and self.portal.has_interface("GlobalShortcuts"):
                 self.shortcut = Shortcut(self.portal, self.shortcut_pressed, self.shortcut_released)
             else:
                 self.shortcut = ExternalShortcut()
@@ -802,22 +806,13 @@ class WaylandHost:
         dialog.destroy()
 
     def shortcut_pressed(self):
-        if self.release_timer is not None:
-            GLib.source_remove(self.release_timer)
-            self.release_timer = None
         if self.hold_timer is None:
             self.hold_timer = GLib.timeout_add(int(self.settings["hold_milliseconds"]), self.held_long_enough)
 
     def shortcut_released(self):
-        if self.release_timer is None:
-            self.release_timer = GLib.timeout_add(45, self.finish_release)
-
-    def finish_release(self):
-        self.release_timer = None
         if self.hold_timer is not None:
             GLib.source_remove(self.hold_timer)
             self.hold_timer = None
-        return False
 
     def held_long_enough(self):
         self.hold_timer = None
@@ -893,8 +888,6 @@ class WaylandHost:
     def quit(self):
         if self.shortcut:
             self.shortcut.stop()
-        if self.release_timer is not None:
-            GLib.source_remove(self.release_timer)
         Gtk.main_quit()
 
 

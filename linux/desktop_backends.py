@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 
 def fullscreen_commands():
@@ -101,26 +102,31 @@ class X11Shortcut:
             raise RuntimeError(f"X11 could not reserve {self.key}; choose another key or free its desktop binding.") from exc
 
         def listen():
+            connection = self.display
             while not self.stopping.is_set():
                 try:
-                    if not select.select([self.display.fileno()], [], [], 0.2)[0]:
+                    if not select.select([connection.fileno()], [], [], 0.2)[0]:
                         continue
-                    while self.display.pending_events():
-                        event = self.display.next_event()
+                    while connection.pending_events():
+                        event = connection.next_event()
                         if event.type in (X.KeyPress, X.KeyRelease) and event.detail == self.keycode:
                             if event.type == X.KeyPress:
                                 GLib.idle_add(self.pressed)
                             elif event.type == X.KeyRelease:
-                                GLib.idle_add(self.released)
-                except (OSError, ValueError):
+                                # X11 autorepeat may emit a synthetic release/press pair.
+                                time.sleep(0.01)
+                                keymap = connection.query_keymap()
+                                if not keymap[self.keycode // 8] & (1 << (self.keycode % 8)):
+                                    GLib.idle_add(self.released)
+                except Exception:
                     break
 
         threading.Thread(target=listen, daemon=True).start()
 
     def stop(self):
-        from Xlib import X
         self.stopping.set()
         if self.display is not None:
+            from Xlib import X
             try:
                 self.root.ungrab_key(self.keycode, X.AnyModifier)
                 self.display.close()
