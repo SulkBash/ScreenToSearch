@@ -14,7 +14,7 @@ from Xlib.ext import xtest
 from gi.repository import GdkPixbuf, Gtk
 
 from desktop_backends import X11Shortcut, capture_fullscreen, runtime_paths, send_command
-from wayland_app import CaptureOverlay
+from wayland_app import CaptureOverlay, WaylandHost
 
 
 class Host:
@@ -64,4 +64,8 @@ with tempfile.TemporaryDirectory() as runtime:
         send_command("release")
         with server.accept()[0] as connection:
             assert connection.recv(32) == b"release"
-print("X11 shortcut, full-screen capture, shared overlay, and compositor commands passed")
+host = WaylandHost()
+assert isinstance(host.shortcut, X11Shortcut)
+host.shortcut.stop()
+host.window.destroy()
+print("X11 host, shortcut, full-screen capture, shared overlay, and compositor commands passed")
