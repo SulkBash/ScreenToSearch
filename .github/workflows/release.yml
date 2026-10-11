@@ -4,12 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  windows-linux:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
@@ -40,26 +43,92 @@ jobs:
           Copy-Item -Path src/ScreenToSearch/models/v6 -Destination linux-package/linux/models -Recurse
           Copy-Item -Path README.md,LICENSE,APACHE-2.0-LICENSE.txt,THIRD_PARTY_LICENSES.txt -Destination linux-package
           Compress-Archive -Path linux-package/* -DestinationPath ScreenToSearch-linux.zip
-          $windowsHash = (Get-FileHash ScreenToSearch-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          $linuxHash = (Get-FileHash ScreenToSearch-linux.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$windowsHash  ScreenToSearch-win-x64.zip" | Set-Content -Encoding ascii SHA256SUMS.txt
-          "$linuxHash  ScreenToSearch-linux.zip" | Add-Content -Encoding ascii SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenToSearch-win-linux
+          path: |
+            ScreenToSearch-win-x64.zip
+            ScreenToSearch-linux.zip
+
+  macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install PP-OCRv6 runtime
+        run: python -m pip install rapidocr onnxruntime pyinstaller
+      - name: Recognize text with bundled models
+        run: python linux/tests/ocr_smoke.py
+      - name: Build macOS app
+        run: sh macos/build-app.sh
+      - name: Check app resources and overlay selection
+        run: |
+          macos/dist/'Screen to Search.app'/Contents/MacOS/ScreenToSearchMac --check
+          macos/dist/'Screen to Search.app'/Contents/MacOS/ScreenToSearchMac --overlay-selftest
+          python macos/tests/smoke_ocr.py
+      - name: Package macOS app
+        run: ditto -c -k --sequesterRsrc --keepParent macos/dist/'Screen to Search.app' ScreenToSearch-macos-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenToSearch-macos-${{ matrix.arch }}
+          path: ScreenToSearch-macos-${{ matrix.arch }}.zip
+
+  package-check:
+    needs: [windows-linux, macos]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ScreenToSearch-*
+          path: dist
+          merge-multiple: true
+      - name: Check packages and calculate checksums
+        run: |
+          cd dist
+          for name in ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip ScreenToSearch-macos-arm64.zip ScreenToSearch-macos-x64.zip; do
+            test -s "$name"
+          done
+          sha256sum ScreenToSearch-*.zip > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            dist/ScreenToSearch-*.zip
+            dist/SHA256SUMS.txt
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package-check
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: dist
       - name: Publish GitHub release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = "release-notes/$env:GITHUB_REF_NAME.md"
-          gh release view $env:GITHUB_REF_NAME --json tagName *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip SHA256SUMS.txt --clobber
-            if ($LASTEXITCODE -ne 0) { throw "GitHub release upload failed with $LASTEXITCODE" }
-            if (Test-Path $notes) {
-              gh release edit $env:GITHUB_REF_NAME --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes
-            }
-          } elseif (Test-Path $notes) {
-            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --notes-file $notes --verify-tag
-          } else {
-            gh release create $env:GITHUB_REF_NAME ScreenToSearch-win-x64.zip ScreenToSearch-linux.zip SHA256SUMS.txt --title "Screen to Search $env:GITHUB_REF_NAME" --generate-notes --verify-tag
-          }
-          if ($LASTEXITCODE -ne 0) { throw "GitHub release publication failed with $LASTEXITCODE" }
+          notes="release-notes/$GITHUB_REF_NAME.md"
+          if gh release view "$GITHUB_REF_NAME" --json tagName >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/ScreenToSearch-*.zip dist/SHA256SUMS.txt --clobber
+            if [ -f "$notes" ]; then
+              gh release edit "$GITHUB_REF_NAME" --title "Screen to Search $GITHUB_REF_NAME" --notes-file "$notes"
+            fi
+          elif [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" dist/ScreenToSearch-*.zip dist/SHA256SUMS.txt --title "Screen to Search $GITHUB_REF_NAME" --notes-file "$notes" --verify-tag
+          else
+            gh release create "$GITHUB_REF_NAME" dist/ScreenToSearch-*.zip dist/SHA256SUMS.txt --title "Screen to Search $GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
