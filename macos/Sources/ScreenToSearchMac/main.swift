@@ -236,8 +236,10 @@ if CommandLine.arguments.contains("--check") {
     }
     print("Screen to Search macOS resources ready (PP-OCRv6)")
 } else {
-    let app = NSApplication.shared
-    let host = MacHost()
-    app.delegate = host
-    app.run()
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        let host = MacHost()
+        app.delegate = host
+        app.run()
+    }
 }
