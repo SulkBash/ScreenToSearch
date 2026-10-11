@@ -29,6 +29,8 @@ jobs:
         run: sh macos/build-app.sh
       - name: Check app resources
         run: macos/dist/'Screen to Search.app'/Contents/MacOS/ScreenToSearchMac --check
+      - name: Exercise macOS overlay selection
+        run: macos/dist/'Screen to Search.app'/Contents/MacOS/ScreenToSearchMac --overlay-selftest
       - name: Recognize text with packaged macOS helper
         run: python macos/tests/smoke_ocr.py
       - name: Package macOS app

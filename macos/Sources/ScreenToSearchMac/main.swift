@@ -267,7 +267,21 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
     }
 }
 
-if CommandLine.arguments.contains("--check") {
+if CommandLine.arguments.contains("--overlay-selftest") {
+    MainActor.assumeIsolated {
+        _ = NSApplication.shared
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 320, pixelsHigh: 200,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let image = bitmap.cgImage else { fatalError("Could not make test image") }
+        let surface = CaptureSurface(frame: CGRect(x: 0, y: 0, width: 320, height: 200), image: image)
+        surface.words = [OCRWord(text: "Hello", x: 10, y: 20, width: 50, height: 20, line: [0, 0, 0])]
+        surface.selected = [0]
+        precondition(surface.selectedText == "Hello", "Word selection failed")
+        precondition(surface.selectedImage != nil, "Image crop failed")
+        print("macOS overlay word selection and image crop passed")
+    }
+} else if CommandLine.arguments.contains("--check") {
     let resources = OCRBridge.resources
     let required = ["ocr_helper.py", "v6_ocr.py", "word_selection.py",
                     "models/v6/PP-OCRv6_det_small.onnx", "models/v6/PP-OCRv6_rec_small.onnx",
