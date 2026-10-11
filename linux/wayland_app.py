@@ -678,7 +678,12 @@ class WaylandHost:
         grid.attach(self.startup_toggle, 0, 6, 2, 1)
         save = Gtk.Button(label="Save settings")
         save.connect("clicked", self.save)
-        box.pack_start(save, False, False, 0)
+        footer = Gtk.Box(spacing=8)
+        footer.pack_start(save, False, False, 0)
+        quit_button = Gtk.Button(label="Quit")
+        quit_button.connect("clicked", lambda *_: self.quit())
+        footer.pack_start(quit_button, False, False, 0)
+        box.pack_start(footer, False, False, 0)
 
     def make_indicator(self):
         if self.portal is None:
