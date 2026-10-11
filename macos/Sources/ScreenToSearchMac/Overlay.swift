@@ -50,6 +50,7 @@ final class CaptureSurface: NSView {
     var close: (() -> Void)?
     private var start: CGPoint?
     private var focused = 0
+    private var undoSelection: (Set<Int>, CGRect?, [CGPoint])?
     private var toolbar: NSStackView!
 
     init(frame: CGRect, image: CGImage) {
@@ -141,6 +142,7 @@ final class CaptureSurface: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if toolbar.frame.contains(point) { return }
+        undoSelection = (selected, selectionRect, lasso)
         start = point
         selectionRect = nil
         lasso = mode == .lasso ? [point] : []
@@ -170,7 +172,7 @@ final class CaptureSurface: NSView {
                           width: abs(start.x - end.x), height: abs(start.y - end.y))
         if mode == .rectangle {
             selectionRect = rect.width > 3 && rect.height > 3 ? rect : nil
-            selected.removeAll()
+            selected = Set(words.indices.filter { rect.contains(center(of: words[$0])) })
         } else if rect.width <= 3 && rect.height <= 3 {
             if let index = words.indices.first(where: {
                 words[$0].rect(in: bounds.size, imageSize: imageSize).contains(end)
@@ -243,10 +245,32 @@ final class CaptureSurface: NSView {
                                width: rect.width * imageSize.width / bounds.width,
                                height: rect.height * imageSize.height / bounds.height).integral
         guard let crop = image.cropping(to: pixelRect) else { return nil }
-        return NSImage(cgImage: crop, size: pixelRect.size)
+        let cropped = NSImage(cgImage: crop, size: pixelRect.size)
+        guard mode == .lasso && lasso.count > 2 else { return cropped }
+        let masked = NSImage(size: pixelRect.size)
+        masked.lockFocus()
+        let path = NSBezierPath()
+        for (index, point) in lasso.enumerated() {
+            let local = CGPoint(x: (point.x - rect.minX) * pixelRect.width / rect.width,
+                                y: (point.y - rect.minY) * pixelRect.height / rect.height)
+            if index == 0 { path.move(to: local) } else { path.line(to: local) }
+        }
+        path.close()
+        path.addClip()
+        cropped.draw(in: CGRect(origin: .zero, size: pixelRect.size))
+        masked.unlockFocus()
+        return masked
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z" {
+            if let previous = undoSelection {
+                selected = previous.0
+                selectionRect = previous.1
+                lasso = previous.2
+            }
+            return
+        }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "a": mode = .smart
         case "t": mode = .text
@@ -254,6 +278,7 @@ final class CaptureSurface: NSView {
         case "l": mode = .lasso
         case "\u{1b}": close?()
         case "\u{7f}": selected.removeAll(); selectionRect = nil; lasso.removeAll()
+        case "\r": if words.indices.contains(focused) { selected = [focused] }
         default:
             if event.keyCode == 123 || event.keyCode == 126 {
                 focused = max(0, focused - 1)
