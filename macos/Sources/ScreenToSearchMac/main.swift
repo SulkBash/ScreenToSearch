@@ -3,7 +3,19 @@ import CoreGraphics
 import ScreenCaptureKit
 import ServiceManagement
 
-private let shortcutKeys: [(String, Int64)] = [("F8", 100), ("F9", 101), ("F10", 109), ("Caps Lock", 57)]
+private struct ShortcutChoice {
+    let name: String
+    let code: Int64
+    let modifiers: CGEventFlags
+}
+private let shortcutKeys = [
+    ShortcutChoice(name: "Control+Option+Space", code: 49,
+                   modifiers: [.maskControl, .maskAlternate]),
+    ShortcutChoice(name: "F8", code: 100, modifiers: []),
+    ShortcutChoice(name: "F9", code: 101, modifiers: []),
+    ShortcutChoice(name: "F10", code: 109, modifiers: []),
+    ShortcutChoice(name: "Caps Lock", code: 57, modifiers: []),
+]
 private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"),
     ("French", "fr"), ("German", "de"), ("Portuguese", "pt"), ("Italian", "it"),
     ("Japanese", "ja"), ("Korean", "ko"), ("Chinese (Simplified)", "zh-CN"),
@@ -17,9 +29,9 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
     private var overlays: [CaptureOverlay] = []
     private var capturing = false
 
-    private var shortcutCode: Int64 {
-        let name = UserDefaults.standard.string(forKey: "shortcut") ?? "F8"
-        return shortcutKeys.first(where: { $0.0 == name })?.1 ?? 100
+    private var shortcut: ShortcutChoice {
+        let name = UserDefaults.standard.string(forKey: "shortcut") ?? shortcutKeys[0].name
+        return shortcutKeys.first(where: { $0.name == name }) ?? shortcutKeys[0]
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -37,11 +49,11 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
 
         let shortcut = NSMenuItem(title: "Hold shortcut", action: nil, keyEquivalent: "")
         let shortcutMenu = NSMenu()
-        for (name, _) in shortcutKeys {
-            let item = NSMenuItem(title: name, action: #selector(selectShortcut(_:)), keyEquivalent: "")
+        for choice in shortcutKeys {
+            let item = NSMenuItem(title: choice.name, action: #selector(selectShortcut(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = name
-            item.state = (UserDefaults.standard.string(forKey: "shortcut") ?? "F8") == name ? .on : .off
+            item.representedObject = choice.name
+            item.state = shortcut.name == choice.name ? .on : .off
             shortcutMenu.addItem(item)
         }
         shortcut.submenu = shortcutMenu
@@ -141,9 +153,10 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
             guard let info else { return Unmanaged.passUnretained(event) }
             let host = Unmanaged<MacHost>.fromOpaque(info).takeUnretainedValue()
             let code = event.getIntegerValueField(.keyboardEventKeycode)
+            let flags = event.flags
             let pressed = type == .keyDown ||
-                (type == .flagsChanged && event.flags.contains(.maskAlphaShift))
-            DispatchQueue.main.async { host.keyboardEvent(type: type, code: code, pressed: pressed) }
+                (type == .flagsChanged && flags.contains(.maskAlphaShift))
+            DispatchQueue.main.async { host.keyboardEvent(type: type, code: code, flags: flags, pressed: pressed) }
             return Unmanaged.passUnretained(event)
         }, userInfo: Unmanaged.passUnretained(self).toOpaque())
         guard let eventTap else {
@@ -156,13 +169,18 @@ private let languages: [(String, String)] = [("English", "en"), ("Spanish", "es"
         CGEvent.tapEnable(tap: eventTap, enable: true)
     }
 
-    private func keyboardEvent(type: CGEventType, code: Int64, pressed: Bool) {
+    private func keyboardEvent(type: CGEventType, code: Int64, flags: CGEventFlags, pressed: Bool) {
         if type == .tapDisabledByTimeout, let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: true)
             return
         }
-        guard code == shortcutCode, type == .keyDown || type == .keyUp || type == .flagsChanged else { return }
+        if type == .flagsChanged, flags.intersection(shortcut.modifiers) != shortcut.modifiers {
+            holdTask?.cancel()
+            holdTask = nil
+        }
+        guard code == shortcut.code, type == .keyDown || type == .keyUp || type == .flagsChanged else { return }
         if pressed {
+            guard flags.intersection(shortcut.modifiers) == shortcut.modifiers else { return }
             guard holdTask == nil else { return }
             let task = DispatchWorkItem { [weak self] in
                 self?.holdTask = nil

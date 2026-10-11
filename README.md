@@ -103,7 +103,7 @@ On other desktops, bind `python3 /absolute/path/to/linux/screen_to_search.py --c
 
 ## macOS
 
-The native macOS menu bar app requires macOS 14 or newer. It captures each display with ScreenCaptureKit, uses the bundled PP-OCRv6 models for word selection, and offers Smart, Text, Rectangle, and Lasso modes. Copy text or an image, search, and translate from the fullscreen overlay. The hold shortcut defaults to **F8**; the menu bar icon lets you change it to F9, F10, or Caps Lock and adjust the hold duration.
+The native macOS menu bar app requires macOS 14 or newer. It captures each display with ScreenCaptureKit, uses the bundled PP-OCRv6 models for word selection, and offers Smart, Text, Rectangle, and Lasso modes. Copy text or an image, search, and translate from the fullscreen overlay. The hold shortcut defaults to **Control+Option+Space**; the menu bar icon lets you change it to F8, F9, F10, or Caps Lock and adjust the hold duration.
 
 To build a `.app` from source on a Mac, install Xcode command line tools and Python 3, then run from the repository root:
 
