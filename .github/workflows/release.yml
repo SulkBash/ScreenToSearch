@@ -45,6 +45,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Verify shared Linux and macOS OCR lifecycle
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
         run: |
           python -m pip install "rapidocr>=3.10.0" onnxruntime
           python -m unittest discover -s linux/tests -v
