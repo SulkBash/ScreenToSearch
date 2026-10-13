@@ -614,10 +614,10 @@ class WaylandHost:
         self.window = Gtk.Window(title="Screen to Search settings")
         self.window.set_default_size(520, 410)
         self.window.connect("delete-event", self.on_window_close)
-        self.make_settings_window()
+        self._settings_built = False
         self.make_indicator()
         if self.indicator is None:
-            self.window.show_all()
+            self.show_settings()
         if self.settings["shortcut_enabled"]:
             self.start_shortcut()
         if capture_now:
@@ -745,10 +745,10 @@ class WaylandHost:
             self.shortcut = None
             self.settings["shortcut_enabled"] = False
             save_settings(self.settings)
+            self.show_settings()
             self._updating_shortcut = True
             self.shortcut_toggle.set_active(False)
             self._updating_shortcut = False
-            self.window.show_all()
             self.error("Global shortcut unavailable: " + str(exc))
 
     def change_x11_shortcut(self, widget):
@@ -798,6 +798,9 @@ class WaylandHost:
             self.error(str(exc))
 
     def show_settings(self):
+        if not self._settings_built:
+            self.make_settings_window()
+            self._settings_built = True
         self.window.show_all()
         self.window.present()
 

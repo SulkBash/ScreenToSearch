@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install PP-OCRv6 runtime
-        run: python -m pip install rapidocr onnxruntime pyinstaller
+        run: python -m pip install "rapidocr>=3.10.0" onnxruntime pyinstaller
       - name: Recognize text with bundled models
         run: python linux/tests/ocr_smoke.py
       - name: Build macOS app

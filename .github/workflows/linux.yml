@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install v6 OCR runtime
-        run: python -m pip install rapidocr onnxruntime
+        run: python -m pip install "rapidocr>=3.10.0" onnxruntime
       - name: Recognize text with packaged PP-OCRv6 models
         run: python linux/tests/ocr_smoke.py
       - name: Install GTK smoke dependencies

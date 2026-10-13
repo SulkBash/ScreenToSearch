@@ -137,7 +137,7 @@ class LinuxAppTests(unittest.TestCase):
             word_results = [[("Hello", 0.9, [[10, 20], [30, 20], [30, 30], [10, 30]]),
                              ("world", 0.9, [[35, 20], [60, 20], [60, 30], [35, 30]])]]
 
-        with patch.object(v6_ocr, "engine", return_value=lambda *args, **kwargs: Result()):
+        with patch.object(v6_ocr, "_run_ocr", return_value=Result()):
             words = v6_ocr.recognize_words(b"png")
         self.assertEqual([word.text for word in words], ["Hello", "world"])
         self.assertEqual(bounds_for_indices(words, {0, 1}), (10, 20, 60, 30))

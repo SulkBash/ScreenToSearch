@@ -1,8 +1,8 @@
 """PP-OCRv6 text and word geometry for the Linux app."""
 
-from functools import lru_cache
 import os
 from pathlib import Path
+import threading
 
 from word_selection import Word, text_for_indices
 
@@ -27,14 +27,22 @@ def available():
         "PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx", "ppocrv6_small_dict.txt"))
 
 
-@lru_cache(maxsize=1)
-def engine():
+_engine = None
+_engine_lock = threading.Lock()
+_idle_timer = None
+_generation = 0
+IDLE_SECONDS = 60
+
+
+def _create_engine():
     from rapidocr import OCRVersion, RapidOCR
+    from onnxruntime import GraphOptimizationLevel, InferenceSession, SessionOptions
+    from omegaconf import flag_override
 
     root = model_dir()
     if not available():
         raise RuntimeError("Install rapidocr and onnxruntime, and keep the PP-OCRv6 models with the app.")
-    return RapidOCR(params={
+    runtime = RapidOCR(params={
         "Global.use_cls": False,
         "Global.return_word_box": True,
         "Det.ocr_version": OCRVersion.PPOCRV6,
@@ -43,6 +51,47 @@ def engine():
         "Rec.model_path": str(root / "PP-OCRv6_rec_small.onnx"),
         "Rec.rec_keys_path": str(root / "ppocrv6_small_dict.txt"),
     })
+    options = SessionOptions()
+    options.enable_cpu_mem_arena = False
+    options.graph_optimization_level = GraphOptimizationLevel.ORT_ENABLE_ALL
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    # RapidOCR supports supplied ONNX sessions; allow their opaque objects in its config.
+    with flag_override(runtime.cfg, "allow_objects", True):
+        for section, name in (("Det", "PP-OCRv6_det_small.onnx"),
+                              ("Rec", "PP-OCRv6_rec_small.onnx")):
+            runtime.cfg[section].session = InferenceSession(
+                str(root / name), sess_options=options, providers=["CPUExecutionProvider"])
+    return runtime
+
+
+def _release_idle_engine(generation):
+    global _engine, _idle_timer
+    with _engine_lock:
+        # A canceled timer may already be waiting on recognition's lock.
+        if generation == _generation:
+            _engine = None
+            _idle_timer = None
+
+
+def _run_ocr(image):
+    global _engine, _idle_timer, _generation
+    # Screen and crop OCR can arrive on different threads. Never run or unload
+    # the shared engine concurrently: RapidOCR mutates its per-request state.
+    with _engine_lock:
+        _generation += 1
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
+        try:
+            if _engine is None:
+                _engine = _create_engine()
+            return _engine(image, use_cls=False, return_word_box=True)
+        finally:
+            if _engine is not None:
+                _idle_timer = threading.Timer(IDLE_SECONDS, _release_idle_engine, (_generation,))
+                _idle_timer.daemon = True  # The one-shot macOS helper must exit immediately.
+                _idle_timer.start()
 
 
 def _bounds(polygon):
@@ -54,7 +103,7 @@ def _bounds(polygon):
 
 
 def recognize_words(image):
-    result = engine()(image, use_cls=False, return_word_box=True)
+    result = _run_ocr(image)
     if result.boxes is None or result.txts is None:
         return []
     words = []

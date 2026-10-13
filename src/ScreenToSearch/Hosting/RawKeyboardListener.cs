@@ -17,6 +17,8 @@ internal sealed class RawKeyboardListener : NativeWindow, IDisposable
     private const uint RidevRemove = 0x00000001;
     private readonly Action<uint, bool> _keyChanged;
     private bool _registered;
+    private IntPtr _buffer;
+    private uint _bufferSize;
 
     public RawKeyboardListener(Action<uint, bool> keyChanged)
     {
@@ -52,18 +54,22 @@ internal sealed class RawKeyboardListener : NativeWindow, IDisposable
             if (GetRawInputData(message.LParam, RidInput, IntPtr.Zero, ref size, headerSize) == 0 &&
                 size >= Marshal.SizeOf<RawInput>())
             {
-                var buffer = Marshal.AllocHGlobal((int)size);
-                try
+                if (size > _bufferSize)
                 {
-                    if (GetRawInputData(message.LParam, RidInput, buffer, ref size, headerSize) != uint.MaxValue)
-                    {
-                        var input = Marshal.PtrToStructure<RawInput>(buffer);
-                        if (input.Header.Type == RimTypeKeyboard && input.Keyboard.VirtualKey != 0xFF)
-                            _keyChanged(input.Keyboard.VirtualKey,
-                                (input.Keyboard.Flags & RiKeyBreak) == 0);
-                    }
+                    var buffer = Marshal.AllocHGlobal(checked((int)size));
+                    Marshal.FreeHGlobal(_buffer);
+                    _buffer = buffer;
+                    _bufferSize = size;
                 }
-                finally { Marshal.FreeHGlobal(buffer); }
+                var received = GetRawInputData(message.LParam, RidInput, _buffer, ref size, headerSize);
+                if (received != uint.MaxValue && received >= Marshal.SizeOf<RawInput>()
+                    && received <= _bufferSize)
+                {
+                    var input = Marshal.PtrToStructure<RawInput>(_buffer);
+                    if (input.Header.Type == RimTypeKeyboard && input.Keyboard.VirtualKey != 0xFF)
+                        _keyChanged(input.Keyboard.VirtualKey,
+                            (input.Keyboard.Flags & RiKeyBreak) == 0);
+                }
             }
         }
         base.WndProc(ref message);
@@ -84,6 +90,9 @@ internal sealed class RawKeyboardListener : NativeWindow, IDisposable
             _registered = false;
         }
         DestroyHandle();
+        Marshal.FreeHGlobal(_buffer);
+        _buffer = IntPtr.Zero;
+        _bufferSize = 0;
     }
 
     [StructLayout(LayoutKind.Sequential)]

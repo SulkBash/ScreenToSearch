@@ -8,8 +8,8 @@
   <key>CFBundleDisplayName</key><string>Screen to Search</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>ScreenToSearch.icns</string>
-  <key>CFBundleShortVersionString</key><string>0.3.1</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.3.3</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSScreenCaptureUsageDescription</key><string>Screen to Search captures a screenshot when you use its shortcut or menu command.</string>

@@ -14,7 +14,7 @@ internal sealed class ResidentHost : IDisposable
 
     private readonly App _app;
     private readonly AppSettings _settings;
-    private readonly MainWindow _settingsWindow;
+    private MainWindow? _settingsWindow;
     private readonly KeyboardHook _hook;
     private readonly RawKeyboardListener? _rawKeyboard;
     private readonly DispatcherTimer _holdTimer;
@@ -32,10 +32,6 @@ internal sealed class ResidentHost : IDisposable
     {
         _app = app;
         _settings = settings;
-        _settingsWindow = new MainWindow(settings);
-        _settingsWindow.Closing += (_, e) => { e.Cancel = true; _settingsWindow.Hide(); };
-        _settingsWindow.SettingsChanged += ApplySettings;
-
         _holdTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ClampThreshold()) };
         _holdTimer.Tick += HoldTimerTick;
         _hook = new KeyboardHook(settings.Shortcut);
@@ -45,11 +41,6 @@ internal sealed class ResidentHost : IDisposable
             _holdTimer.Start();
         };
         _hook.Released += () => _holdTimer.Stop();
-        _settingsWindow.ShortcutRecordingChanged += recording =>
-        {
-            _holdTimer.Stop();
-            _hook.SetShortcut(recording ? ShortcutBinding.Disabled : _settings.Shortcut);
-        };
         try { _rawKeyboard = new RawKeyboardListener(_hook.OnRawKey); }
         catch (System.ComponentModel.Win32Exception) { /* The primary hook still works. */ }
 
@@ -78,17 +69,6 @@ internal sealed class ResidentHost : IDisposable
             // Raw Input can still open the capture surface if a hook is unavailable.
         }
         _ = ListenForSecondLaunchAsync();
-        _ = WarmUpOcrAsync();
-    }
-
-    private async Task WarmUpOcrAsync()
-    {
-        try
-        {
-            await NeuralOcrService.WarmUpAsync(_pipeCancellation.Token);
-        }
-        catch (OperationCanceledException) { }
-        catch { /* Recognition will report a model loading error when requested. */ }
     }
 
     private int ClampThreshold() => Math.Clamp(_settings.HoldMilliseconds, 200, 1000);
@@ -120,6 +100,22 @@ internal sealed class ResidentHost : IDisposable
     public void ShowSettings()
     {
         if (_disposed) return;
+        if (_settingsWindow is null)
+        {
+            _settingsWindow = new MainWindow(_settings);
+            _settingsWindow.Closing += (_, e) =>
+            {
+                if (_disposed) return;
+                e.Cancel = true;
+                _settingsWindow.Hide();
+            };
+            _settingsWindow.SettingsChanged += ApplySettings;
+            _settingsWindow.ShortcutRecordingChanged += recording =>
+            {
+                _holdTimer.Stop();
+                _hook.SetShortcut(recording ? ShortcutBinding.Disabled : _settings.Shortcut);
+            };
+        }
         if (_settingsWindow.WindowState == WindowState.Minimized)
             _settingsWindow.WindowState = WindowState.Normal;
         _settingsWindow.Show();
@@ -137,8 +133,8 @@ internal sealed class ResidentHost : IDisposable
         }
 
         _openingSurface = true;
-        _restoreSettingsAfterSurface = _settingsWindow.IsVisible;
-        if (_restoreSettingsAfterSurface) _settingsWindow.Hide();
+        _restoreSettingsAfterSurface = _settingsWindow?.IsVisible == true;
+        if (_restoreSettingsAfterSurface) _settingsWindow!.Hide();
         try
         {
             if (_restoreSettingsAfterSurface) await Task.Delay(80);
@@ -244,7 +240,7 @@ internal sealed class ResidentHost : IDisposable
         _tray.ContextMenuStrip?.Dispose();
         _tray.Dispose();
         _trayIcon.Dispose();
-        _settingsWindow.Close();
+        _settingsWindow?.Close();
         _pipeCancellation.Dispose();
     }
 

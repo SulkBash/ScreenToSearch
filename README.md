@@ -12,6 +12,10 @@ Download `ScreenToSearch-win-x64.zip` from the [Releases page](../../releases), 
 
 The app stays in the system tray. Double-click its icon to open Settings, or right-click it to open the capture screen, open Settings, or quit. Closing Settings doesn't quit the app. You can choose whether it starts when you sign in to Windows.
 
+To start automatically, enable **Launch at sign-in** in Settings. Keep the extracted app in a permanent folder before enabling it; Windows starts that copy in the tray when you sign in.
+
+While waiting in the tray, the app uses keyboard events rather than polling and takes no screenshots. Settings is created when first opened. OCR models load on the first capture and are released after 60 seconds without recognition; the next capture reloads them. Inference workers sleep between tasks, and large temporary inference buffers are not kept in a CPU memory arena. This reduces background memory use at the cost of some extra recognition latency after an idle period. The hold timer runs only while the shortcut is pressed.
+
 ### Use it
 
 1. Hold **Caps Lock** briefly to take a snapshot of your screen. You can change the shortcut and how long you need to hold it in Settings, or turn the shortcut off and open the app from the tray instead.
@@ -62,15 +66,20 @@ The app includes a couple of local checks. After publishing it, run these comman
 ```powershell
 .\publish\ScreenToSearch.exe --stage2-selftest .\stage2-report.json
 .\publish\ScreenToSearch.exe --stage0-selftest .\stage0-report.json
+.\publish\ScreenToSearch.exe --ocr-lifecycle-selftest .\ocr-lifecycle-report.json
 ```
 
 For a closer look at text recognition on an image, use `--ocr-image-report <image-path> <report-json-path>`. Windows uses one PP-OCRv6 detector and recognizer for all text recognition.
 
+The OCR lifecycle check takes just over a minute. It verifies loading on demand, warm reuse, cancellation, automatic release after inactivity, and recognition after reloading, and reports timings and private memory use.
+
 ## Linux
 
-The Linux entry point is [linux/screen_to_search.py](linux/screen_to_search.py). The GTK app uses the same fullscreen, darkened OCR overlay on GNOME, KDE Plasma, X11 desktops, and other Wayland compositors. It uses the bundled PP-OCRv6 models through RapidOCR for Python. Install Python 3, GTK 3's Python introspection package, `python3-gi`, `python3-cairo`, `python3-gi-cairo`, `rapidocr`, `onnxruntime`, and `wl-clipboard` on Wayland or `xclip` on X11. An AppIndicator library provides a panel icon where the desktop supports one; otherwise, launch the app again to reopen Settings. Keep `linux/models/v6` beside the scripts.
+The Linux entry point is [linux/screen_to_search.py](linux/screen_to_search.py). The GTK app uses the same fullscreen, darkened OCR overlay on GNOME, KDE Plasma, X11 desktops, and other Wayland compositors. It uses the bundled PP-OCRv6 models through RapidOCR for Python. Install Python 3, GTK 3's Python introspection package, `python3-gi`, `python3-cairo`, `python3-gi-cairo`, RapidOCR 3.10 or newer, `onnxruntime`, and `wl-clipboard` on Wayland or `xclip` on X11. An AppIndicator library provides a panel icon where the desktop supports one; otherwise, launch the app again to reopen Settings. Keep `linux/models/v6` beside the scripts.
 
-Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout. Install Python packages into the environment used by the launcher (`python3 -m pip install rapidocr onnxruntime`). Package names vary by distribution; on Debian or Ubuntu the GTK and indicator introspection packages are commonly `gir1.2-gtk-3.0` and `gir1.2-ayatanaappindicator3-0.1`.
+Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout. Install Python packages into the environment used by the launcher (`python3 -m pip install "rapidocr>=3.10.0" onnxruntime`). Package names vary by distribution; on Debian or Ubuntu the GTK and indicator introspection packages are commonly `gir1.2-gtk-3.0` and `gir1.2-ayatanaappindicator3-0.1`.
+
+Linux loads OCR on demand and releases the shared engine after 60 seconds without recognition. Requests are serialized so recognition and unloading cannot overlap. OCR workers sleep between tasks, and temporary inference buffers are not retained in a CPU memory arena. When a tray icon is available, Settings widgets are created only when first opened.
 
 ```sh
 python3 linux/screen_to_search.py --check
@@ -104,12 +113,14 @@ The native macOS menu bar app requires macOS 14 or newer. It captures each displ
 To build a `.app` from source on a Mac, install Xcode command line tools and Python 3, then run from the repository root:
 
 ```sh
-python3 -m pip install rapidocr onnxruntime pyinstaller
+python3 -m pip install "rapidocr>=3.10.0" onnxruntime pyinstaller
 sh macos/build-app.sh
 open 'macos/dist/Screen to Search.app'
 ```
 
 The build script bundles the Python OCR helper and v6 models inside the app. macOS asks for **Input Monitoring** to use the global hold shortcut and **Screen & System Audio Recording** to capture the display. If you decline Input Monitoring, **Capture now** remains available from the menu bar icon. The menu also controls search engine, translation language, and start at login.
+
+The macOS OCR helper runs only for a recognition request and exits when finished, releasing its models and native buffers immediately. It uses the shared Linux/macOS OCR engine with sleeping inference workers and no retained CPU memory arena. The menu bar host keeps no OCR engine running while idle.
 
 ## Privacy and limitations
 

@@ -12,6 +12,14 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length > 0 && e.Args[0] == "--ocr-lifecycle-selftest")
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var report = e.Args.Length > 1 ? e.Args[1]
+                : Path.Combine(AppContext.BaseDirectory, "ocr-lifecycle-report.json");
+            Shutdown(await OcrLifecycleSelfTest.RunAsync(report));
+            return;
+        }
         if (e.Args.Length > 0 && e.Args[0] == "--stage0-selftest")
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;

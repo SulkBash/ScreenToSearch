@@ -8,24 +8,49 @@ internal sealed class NeuralOcrService
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static RapidOcr? _engine;
+    private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(60);
+    // One wake-up after the last request, rather than a recurring background poll.
+    private static readonly System.Threading.Timer IdleTimer = new(
+        _ => ReleaseIdleEngine(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
-    public static async Task WarmUpAsync(CancellationToken cancellationToken = default)
+    private static void ReleaseIdleEngine()
     {
-        await Gate.WaitAsync(cancellationToken);
-        try { await Task.Run(GetEngine, cancellationToken); }
+        // Recognition owns the same gate, so a timer can never dispose an engine in use.
+        if (!Gate.Wait(0)) return;
+        try
+        {
+            // A callback already queued before a new request may arrive late.
+            var remaining = IdleTimeout - TimeSpan.FromMilliseconds(Environment.TickCount64 - _lastUse);
+            if (remaining > TimeSpan.Zero)
+            {
+                IdleTimer.Change(remaining, Timeout.InfiniteTimeSpan);
+                return;
+            }
+            _engine?.Dispose();
+            _engine = null;
+        }
         finally { Gate.Release(); }
     }
+
+    private static long _lastUse;
 
     public async Task<OcrDocument> RecognizeAsync(byte[] image, CancellationToken cancellationToken = default,
         int maxSide = 0)
     {
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IdleTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         try
         {
-            return await RecognizeCoreAsync(image, maxSide, cancellationToken)
+            // Model initialization also belongs off the UI thread on a cold first use.
+            return await Task.Run(() => RecognizeCoreAsync(image, maxSide, cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
         }
-        finally { Gate.Release(); }
+        finally
+        {
+            _lastUse = Environment.TickCount64;
+            IdleTimer.Change(IdleTimeout, Timeout.InfiniteTimeSpan);
+            Gate.Release();
+        }
     }
 
     private static async Task<OcrDocument> RecognizeCoreAsync(byte[] image, int maxSide,
@@ -126,7 +151,21 @@ internal sealed class NeuralOcrService
             RecModelPath = Path.Combine(models, "v6", "PP-OCRv6_rec_small.onnx"),
             KeysPath = Path.Combine(models, "v6", "ppocrv6_small_dict.txt")
         };
-        engine.InitModels(set);
-        return engine;
+        try
+        {
+            using var options = RapidOcr.GetDefaultSessionOptions();
+            // Screenshots vary in size; don't retain the largest inference's scratch arena.
+            options.EnableCpuMemArena = false;
+            // This is an occasional desktop task: let workers sleep between inference runs.
+            options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
+            options.AddSessionConfigEntry("session.inter_op.allow_spinning", "0");
+            engine.InitModels(set, options);
+            return engine;
+        }
+        catch
+        {
+            engine.Dispose();
+            throw;
+        }
     }
 }
