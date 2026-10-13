@@ -79,7 +79,7 @@ The Linux entry point is [linux/screen_to_search.py](linux/screen_to_search.py).
 
 Download `ScreenToSearch-linux.zip` from the [Releases page](../../releases) and extract it, or use this repository checkout. Install Python packages into the environment used by the launcher (`python3 -m pip install "rapidocr>=3.10.0" onnxruntime`). Package names vary by distribution; on Debian or Ubuntu the GTK and indicator introspection packages are commonly `gir1.2-gtk-3.0` and `gir1.2-ayatanaappindicator3-0.1`.
 
-Linux loads OCR on demand and releases the shared engine after 60 seconds without recognition. Requests are serialized so recognition and unloading cannot overlap. OCR workers sleep between tasks, and temporary inference buffers are not retained in a CPU memory arena. When a tray icon is available, Settings widgets are created only when first opened.
+Linux loads OCR on demand and releases the shared engine after 60 seconds without recognition. Requests are serialized so recognition and unloading cannot overlap. OCR workers sleep between tasks, and temporary inference buffers are not retained in a CPU memory arena. When a tray icon is available, Settings widgets are created only when first opened. The X11 shortcut listener blocks on events and an explicit shutdown signal instead of waking five times per second to poll.
 
 ```sh
 python3 linux/screen_to_search.py --check

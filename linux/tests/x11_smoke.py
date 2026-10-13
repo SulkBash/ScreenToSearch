@@ -50,6 +50,21 @@ for kind in (X.KeyPress, X.KeyRelease):
             Gtk.main_iteration_do(False)
         time.sleep(0.01)
 assert events == ["press", "release"], events
+stopped = time.monotonic()
+shortcut.stop()
+assert time.monotonic() - stopped < 0.5, "Idle X11 listener did not wake promptly to stop"
+# Restarting the same listener must clear its stop signal and release its old descriptors.
+shortcut.start()
+for kind in (X.KeyPress, X.KeyRelease):
+    xtest.fake_input(sender, kind, code)
+    sender.sync()
+    deadline = time.monotonic() + 3
+    expected = 3 if kind == X.KeyPress else 4
+    while len(events) < expected and time.monotonic() < deadline:
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+        time.sleep(0.01)
+assert events == ["press", "release", "press", "release"], events
 shortcut.stop()
 sender.close()
 with tempfile.TemporaryDirectory() as runtime:

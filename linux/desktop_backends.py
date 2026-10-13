@@ -102,20 +102,28 @@ class X11Shortcut:
         self.keycode = None
         self.stopping = threading.Event()
         self.thread = None
+        self._wake_reader = None
+        self._wake_writer = None
 
     def start(self):
         from Xlib import X, XK, display
         from gi.repository import GLib
 
+        if self.thread is not None:
+            return
+        self.stopping.clear()
         self.display = display.Display()
         self.root = self.display.screen().root
         self.keycode = self.display.keysym_to_keycode(XK.string_to_keysym(self.key))
         if not self.keycode:
+            self.display.close()
+            self.display = None
             raise RuntimeError(f"X11 cannot resolve {self.key} on this keyboard.")
         try:
             self.root.grab_key(self.keycode, X.AnyModifier, False,
                                X.GrabModeAsync, X.GrabModeAsync)
             self.display.sync()
+            self._wake_reader, self._wake_writer = socket.socketpair()
         except Exception as exc:
             self.display.close()
             self.display = None
@@ -125,8 +133,11 @@ class X11Shortcut:
             connection = self.display
             while not self.stopping.is_set():
                 try:
-                    if not select.select([connection.fileno()], [], [], 0.2)[0]:
-                        continue
+                    if not connection.pending_events():
+                        # Sleep until an X11 event or an explicit stop signal, with no idle polling.
+                        ready, _, _ = select.select([connection.fileno(), self._wake_reader], [], [])
+                        if self._wake_reader in ready:
+                            break
                     while connection.pending_events():
                         event = connection.next_event()
                         if event.type in (X.KeyPress, X.KeyRelease) and event.detail == self.keycode:
@@ -146,6 +157,11 @@ class X11Shortcut:
 
     def stop(self):
         self.stopping.set()
+        if self._wake_writer is not None:
+            try:
+                self._wake_writer.send(b"\0")
+            except OSError:
+                pass
         if self.thread is not None:
             self.thread.join(timeout=0.5)
             self.thread = None
@@ -157,6 +173,10 @@ class X11Shortcut:
             except (OSError, ValueError):
                 pass
             self.display = None
+        for channel in (self._wake_reader, self._wake_writer):
+            if channel is not None:
+                channel.close()
+        self._wake_reader = self._wake_writer = None
 
     def configure(self):
         raise RuntimeError("Choose F8, F9, or F10 in Settings to change the X11 shortcut.")
