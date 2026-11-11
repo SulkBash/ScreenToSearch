@@ -297,6 +297,31 @@ if CommandLine.arguments.contains("--overlay-selftest") {
         surface.selected = [0]
         precondition(surface.selectedText == "Hello", "Word selection failed")
         precondition(surface.selectedImage != nil, "Image crop failed")
+        func word(_ text: String, x: Double, spaceBefore: Bool?) -> OCRWord {
+            let characters = text.enumerated().map { index, char in
+                OCRCharacter(text: String(char), x: x + Double(index) * 10, y: 20, width: 10, height: 20)
+            }
+            return OCRWord(text: text, x: x, y: 20, width: Double(characters.count) * 10,
+                           height: 20, line: [0, 0, 0], spaceBefore: spaceBefore, characters: characters)
+        }
+        surface.words = [word("Hello", x: 10, spaceBefore: nil), word("world", x: 70, spaceBefore: true)]
+        surface.mode = .smart
+        precondition(surface.selectText(from: CGPoint(x: 25, y: 170), to: CGPoint(x: 95, y: 170), moved: true))
+        precondition(surface.selectedText == "Hello world", "Smart drag must select whole words")
+        precondition(surface.selectText(from: CGPoint(x: 95, y: 170), to: CGPoint(x: 25, y: 170), moved: true))
+        precondition(surface.selectedText == "Hello world", "Reverse Smart drag must select whole words")
+        surface.mode = .text
+        precondition(surface.selectText(from: CGPoint(x: 25, y: 170), to: CGPoint(x: 95, y: 170), moved: true))
+        precondition(surface.selectedText == "ello wor", "Text drag must select individual characters")
+        precondition(surface.selectedImage != nil, "Character selection image crop failed")
+        surface.words = [word("ID:", x: 10, spaceBefore: nil), word("123", x: 50, spaceBefore: false)]
+        surface.mode = .smart
+        precondition(surface.selectText(from: CGPoint(x: 15, y: 170), to: CGPoint(x: 75, y: 170), moved: true))
+        precondition(surface.selectedText == "ID:123", "A joined label must retain its original spacing")
+        surface.words = [OCRWord(text: "中", x: 10, y: 20, width: 20, height: 20, line: [0, 0, 0]),
+                         OCRWord(text: "文", x: 30, y: 20, width: 20, height: 20, line: [0, 0, 0])]
+        surface.selected = [0, 1]
+        precondition(surface.selectedText == "中文", "CJK characters must not gain spaces")
         surface.mode = .lasso
         surface.lasso = [CGPoint(x: 5, y: 150), CGPoint(x: 75, y: 150),
                          CGPoint(x: 70, y: 185), CGPoint(x: 5, y: 185)]

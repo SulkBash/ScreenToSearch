@@ -23,8 +23,14 @@ internal sealed class OcrDocumentBuilder
                 var bounds = word.Bounds;
                 if (string.IsNullOrWhiteSpace(word.Text) || bounds.Width <= 0 || bounds.Height <= 0)
                     continue;
-                var projected = new OcrWord(word.Text, new PixelBounds(
-                    area.X + bounds.X, area.Y + bounds.Y, bounds.Width, bounds.Height));
+                var projected = word with
+                {
+                    Bounds = bounds.Offset(area.X, area.Y),
+                    Characters = word.Characters?.Select(character => character with
+                    {
+                        Bounds = character.Bounds.Offset(area.X, area.Y)
+                    }).ToArray()
+                };
                 if (_words.Any(existing => SameLocation(existing.Bounds, projected.Bounds))
                     || CoveredByExistingWords(projected.Bounds)) continue;
                 accepted.Add(projected);

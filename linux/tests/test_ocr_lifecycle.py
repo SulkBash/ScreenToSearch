@@ -23,10 +23,12 @@ class OcrLifecycleTests(unittest.TestCase):
         first, second = Mock(), Mock()
         self.factory.side_effect = [first, second]
         self.assertIsNone(v6_ocr._engine)
-        v6_ocr._run_ocr("first")
+        v6_ocr._run_ocr("first", include_characters=True)
         v6_ocr._run_ocr("second")
         self.assertEqual(self.factory.call_count, 1)
         self.assertEqual(first.call_count, 2)
+        first.assert_any_call("first", use_cls=False, return_word_box=True, return_single_char_box=True)
+        first.assert_any_call("second", use_cls=False, return_word_box=True, return_single_char_box=False)
         self.assertTrue(self.timer.return_value.daemon)
         generation = v6_ocr._generation
         v6_ocr._release_idle_engine(generation)

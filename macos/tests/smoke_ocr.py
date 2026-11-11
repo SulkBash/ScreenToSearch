@@ -27,4 +27,6 @@ with tempfile.TemporaryDirectory() as directory:
                             env=env, check=True, timeout=90)
 words = json.loads(result.stdout)
 assert "CIRCLE" in " ".join(word["text"] for word in words).upper(), words
+circle = next(word for word in words if word["text"].upper() == "CIRCLE")
+assert "".join(char["text"] for char in circle["characters"]).upper() == "CIRCLE", circle
 print("Packaged macOS OCR helper recognized:", " ".join(word["text"] for word in words))

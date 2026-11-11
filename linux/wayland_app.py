@@ -23,7 +23,8 @@ from screen_to_search import (APP_ID, SEARCH_URLS, autostart_path, copy_data, lo
 from desktop_backends import (ExternalShortcut, X11Shortcut, capture_fullscreen,
                               runtime_paths, send_command)
 from v6_ocr import recognize_text, recognize_words
-from word_selection import Word, bounds_for_indices, monitor_crops, text_for_indices
+from word_selection import (WordIndex, bounds_for_indices, character_at, character_range_words,
+                            monitor_crops, move_character, text_for_character_range, text_for_indices)
 
 
 PORTAL_NAME = "org.freedesktop.portal.Desktop"
@@ -172,15 +173,20 @@ class CaptureOverlay(Gtk.Window):
         self.host = host
         self.pixbuf = pixbuf
         self.words = words
+        self.word_index = WordIndex(words)
         self.mode = "smart"
         self.selected = set()
+        self.character_range = None
         self.selection_text = ""
         self.rect = None
         self.polygon = None
         self.drawing = []
         self.history = []
         self.focused_word = -1
+        self.focused_character = 0
+        self.keyboard_anchor = None
         self.start_word = None
+        self.start_character = 0
         self.start_point = None
         self.before_drag = None
         self.scale = 1.0
@@ -280,7 +286,7 @@ class CaptureOverlay(Gtk.Window):
         cr.paint()
         cr.set_source_rgba(0, 0, 0, 0.38)
         cr.paint()
-        bounds = self.rect or bounds_for_indices(self.words, self.selected)
+        bounds = self.rect or self.selected_bounds()
         if bounds:
             cr.save()
             if self.polygon and len(self.polygon) >= 3:
@@ -296,13 +302,24 @@ class CaptureOverlay(Gtk.Window):
             cr.paint()
             cr.restore()
         cr.set_line_width(2 / self.scale)
-        for index, word in enumerate(self.words):
-            if index in self.selected or index == self.focused_word:
-                cr.set_source_rgba(0.15, 0.55, 1.0, 0.38)
-                cr.rectangle(word.x, word.y, word.width, word.height)
-                cr.fill_preserve()
-                cr.set_source_rgba(0.1, 0.4, 1.0, 0.9)
-                cr.stroke()
+        if self.character_range:
+            first, last = self.character_range
+            selected = character_range_words(self.words, first, last)
+        else:
+            selected = [self.words[index] for index in sorted(self.selected)]
+        for word in selected:
+            cr.set_source_rgba(0.15, 0.55, 1.0, 0.38)
+            cr.rectangle(word.x, word.y, word.width, word.height)
+            cr.fill_preserve()
+            cr.set_source_rgba(0.1, 0.4, 1.0, 0.9)
+            cr.stroke()
+        if self.focused_word >= 0 and self.focused_word not in self.selected:
+            word = self.words[self.focused_word]
+            if self.mode == "text" and word.characters:
+                word = word.characters[self.focused_character]
+            cr.set_source_rgba(0.1, 0.4, 1.0, 0.9)
+            cr.rectangle(word.x, word.y, word.width, word.height)
+            cr.stroke()
         if self.rect:
             x0, y0, x1, y1 = self.rect
             cr.set_source_rgba(0.15, 0.55, 1.0, 0.23)
@@ -318,8 +335,14 @@ class CaptureOverlay(Gtk.Window):
             cr.stroke()
         return False
 
-    def word_at(self, x, y):
-        return next((i for i, word in enumerate(self.words) if word.contains(x, y)), None)
+    def word_at(self, x, y, extend=False):
+        return self.word_index.word_at(x, y, extend)
+
+    def selected_bounds(self):
+        if self.character_range:
+            selected = character_range_words(self.words, *self.character_range)
+            return bounds_for_indices(selected, range(len(selected)))
+        return bounds_for_indices(self.words, self.selected)
 
     def on_press(self, _surface, event):
         if event.button != 1:
@@ -327,14 +350,21 @@ class CaptureOverlay(Gtk.Window):
         x, y = self.image_point(event.x, event.y)
         self.before_drag = self.snapshot()
         self.start_word = self.word_at(x, y) if self.mode in ("smart", "text") else None
+        self.start_character = character_at(self.words[self.start_word], x, y) if self.start_word is not None else 0
+        self.keyboard_anchor = None
         self.start_point = (x, y)
         self.selected.clear()
+        self.character_range = None
         self.selection_text = ""
         self.rect = None
         self.polygon = [(x, y)] if self.mode == "lasso" else None
         self.actions.hide()
         if self.start_word is not None:
             self.selected.add(self.start_word)
+            self.focused_word, self.focused_character = self.start_word, self.start_character
+            if self.mode == "text":
+                position = (self.start_word, self.start_character)
+                self.character_range = (position, position)
         self.surface.queue_draw()
         return True
 
@@ -345,9 +375,12 @@ class CaptureOverlay(Gtk.Window):
         if self.mode == "lasso":
             self.polygon.append((x, y))
         elif self.start_word is not None:
-            end = self.word_at(x, y)
+            end = self.word_at(x, y, extend=True)
             if end is not None:
                 self.selected = set(range(min(self.start_word, end), max(self.start_word, end) + 1))
+                if self.mode == "text":
+                    self.character_range = ((self.start_word, self.start_character),
+                                            (end, character_at(self.words[end], x, y)))
         else:
             x0, y0 = self.start_point
             self.rect = (min(x0, x), min(y0, y), max(x0, x), max(y0, y))
@@ -361,7 +394,7 @@ class CaptureOverlay(Gtk.Window):
             return False
         x, y = self.image_point(event.x, event.y)
         start_x, start_y = self.start_point
-        moved = (x - start_x) ** 2 + (y - start_y) ** 2 >= 64
+        moved = (x - start_x) ** 2 + (y - start_y) ** 2 >= (16 if self.mode == "text" else 64)
         if self.mode == "lasso":
             self.polygon.append((x, y))
             if len(self.polygon) >= 3:
@@ -377,16 +410,27 @@ class CaptureOverlay(Gtk.Window):
                 self.selection_text = self.recognize_crop()
                 self.commit("Rectangle selected. Choose an action.")
         elif self.start_word is not None:
-            end = self.word_at(x, y)
+            end = self.word_at(x, y, extend=True)
             if not moved:
                 self.selected = {self.start_word}
+                if self.mode == "text":
+                    position = (self.start_word, self.start_character)
+                    self.character_range = (position, position)
+                    self.keyboard_anchor = position
             elif end is not None:
                 self.selected = set(range(min(self.start_word, end), max(self.start_word, end) + 1))
+                self.focused_word = end
+                self.focused_character = character_at(self.words[end], x, y)
+                if self.mode == "text":
+                    self.keyboard_anchor = (self.start_word, self.start_character)
+                    self.character_range = (self.keyboard_anchor, (end, self.focused_character))
             else:
+                self.character_range = None
                 self.rect = (min(start_x, x), min(start_y, y), max(start_x, x), max(start_y, y))
                 self.selected = {i for i, word in enumerate(self.words) if word.intersects(self.rect)}
             if self.selected:
-                self.selection_text = text_for_indices(self.words, self.selected)
+                self.selection_text = (text_for_character_range(self.words, *self.character_range)
+                                       if self.character_range else text_for_indices(self.words, self.selected))
                 self.commit("Text selected. Choose an action.")
             elif self.mode == "smart" and self.rect:
                 self.selection_text = self.recognize_crop()
@@ -433,22 +477,51 @@ class CaptureOverlay(Gtk.Window):
         if self.mode in ("smart", "text") and self.words:
             if event.keyval in (Gdk.KEY_Left, Gdk.KEY_Up, Gdk.KEY_Right, Gdk.KEY_Down):
                 step = -1 if event.keyval in (Gdk.KEY_Left, Gdk.KEY_Up) else 1
-                self.focused_word = max(0, min(len(self.words) - 1,
-                                               self.focused_word + step if self.focused_word >= 0 else 0))
-                if event.state & Gdk.ModifierType.SHIFT_MASK and self.selected:
+                old = (self.focused_word, self.focused_character) if self.focused_word >= 0 else (0, 0)
+                if self.focused_word < 0:
+                    current = old
+                elif self.mode == "text" and event.keyval in (Gdk.KEY_Left, Gdk.KEY_Right):
+                    current = move_character(self.words, old, step)
+                else:
+                    index = max(0, min(len(self.words) - 1, self.focused_word + step))
+                    current = (index, min(self.focused_character, max(1, len(self.words[index].characters)) - 1))
+                self.focused_word, self.focused_character = current
+                if event.state & Gdk.ModifierType.SHIFT_MASK and self.mode == "text":
+                    self.before_drag = self.snapshot()
+                    if self.keyboard_anchor is None:
+                        self.keyboard_anchor = old
+                    self.character_range = (self.keyboard_anchor, current)
+                    first, last = sorted((self.keyboard_anchor[0], current[0]))
+                    self.selected = set(range(first, last + 1))
+                    self.rect = None
+                    self.selection_text = text_for_character_range(self.words, *self.character_range)
+                    self.commit("Text selected. Choose an action.")
+                elif event.state & Gdk.ModifierType.SHIFT_MASK and self.selected:
                     anchor = min(self.selected)
                     self.before_drag = self.snapshot()
                     self.selected = set(range(min(anchor, self.focused_word), max(anchor, self.focused_word) + 1))
+                    self.character_range = None
                     self.selection_text = text_for_indices(self.words, self.selected)
                     self.commit("Text selected. Choose an action.")
-                self.status.set_text(f"Word {self.focused_word + 1} of {len(self.words)}: "
-                                     f"{self.words[self.focused_word].text}. Press Enter to select.")
+                else:
+                    self.keyboard_anchor = None
+                word = self.words[self.focused_word]
+                text = (word.characters[self.focused_character].text
+                        if self.mode == "text" and word.characters else word.text)
+                self.status.set_text(f"{'Character' if self.mode == 'text' else 'Word'}: {text}. Press Enter to select.")
                 self.surface.queue_draw()
                 return True
             if event.keyval in (Gdk.KEY_Return, Gdk.KEY_space) and self.focused_word >= 0:
                 self.before_drag = self.snapshot()
                 self.selected = {self.focused_word}
-                self.selection_text = self.words[self.focused_word].text
+                if self.mode == "text":
+                    position = (self.focused_word, self.focused_character)
+                    self.keyboard_anchor = position
+                    self.character_range = (position, position)
+                    self.selection_text = text_for_character_range(self.words, position, position)
+                else:
+                    self.character_range = None
+                    self.selection_text = self.words[self.focused_word].text
                 self.rect = None
                 self.commit("Text selected. Choose an action.")
                 return True
@@ -456,10 +529,10 @@ class CaptureOverlay(Gtk.Window):
 
     def snapshot(self):
         return (self.selected.copy(), self.rect, list(self.polygon) if self.polygon else None,
-                self.selection_text)
+                self.selection_text, self.character_range)
 
     def commit(self, message):
-        bounds = self.rect or bounds_for_indices(self.words, self.selected)
+        bounds = self.rect or self.selected_bounds()
         if not bounds or (not self.selected and (bounds[2] - bounds[0] < 8 or bounds[3] - bounds[1] < 8)):
             self.status.set_text("Draw a larger selection.")
             return
@@ -474,6 +547,7 @@ class CaptureOverlay(Gtk.Window):
         if not self.get_visible():
             return False
         self.words = words
+        self.word_index = WordIndex(words)
         self.status.set_text(f"{len(words)} words ready. Tap or sweep text; drag empty space for an image.")
         self.surface.queue_draw()
         return False
@@ -485,8 +559,10 @@ class CaptureOverlay(Gtk.Window):
     def set_mode(self, mode):
         self.mode = mode
         self.focused_word = -1
+        self.focused_character = 0
+        self.keyboard_anchor = None
         self.status.set_text({"smart": "Smart: tap/sweep words or drag an area.",
-                              "text": "Text: tap a word or drag across words.",
+                              "text": "Text: tap a character or drag across text.",
                               "rectangle": "Rectangle: drag around text or an image.",
                               "lasso": "Lasso: draw around text or an image."}[mode])
         self.surface.queue_draw()
@@ -494,7 +570,8 @@ class CaptureOverlay(Gtk.Window):
     def undo(self):
         if not self.history:
             return
-        self.selected, self.rect, self.polygon, self.selection_text = self.history.pop()
+        self.selected, self.rect, self.polygon, self.selection_text, self.character_range = self.history.pop()
+        self.keyboard_anchor = None
         self.update_actions()
         self.actions.set_visible(bool(self.rect or self.selected))
         self.status.set_text("Previous selection restored." if self.actions.get_visible() else "Selection undone.")
@@ -506,6 +583,8 @@ class CaptureOverlay(Gtk.Window):
         self.history.append(self.snapshot())
         self.history = self.history[-10:]
         self.selected.clear()
+        self.character_range = None
+        self.keyboard_anchor = None
         self.rect = None
         self.polygon = None
         self.selection_text = ""
@@ -562,7 +641,7 @@ class CaptureOverlay(Gtk.Window):
             return None
 
     def image_bounds(self):
-        bounds = self.rect or bounds_for_indices(self.words, self.selected)
+        bounds = self.rect or self.selected_bounds()
         if bounds is None:
             raise ValueError("Select a word or draw a region first.")
         x0, y0, x1, y1 = bounds
@@ -867,7 +946,7 @@ class WaylandHost:
                     if owned:
                         path.unlink(missing_ok=True)
                 for overlay, (x, y, width, height) in zip(overlays, crops):
-                    local = [Word(word.text, word.x - x, word.y - y, word.width, word.height, word.line)
+                    local = [word.offset(-x, -y)
                              for word in words if x <= word.x + word.width / 2 < x + width
                              and y <= word.y + word.height / 2 < y + height]
                     GLib.idle_add(overlay.set_words, local)

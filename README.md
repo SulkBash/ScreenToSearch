@@ -25,16 +25,17 @@ While waiting in the tray, the app uses keyboard events rather than polling and 
 ### Use it
 
 1. Hold **Caps Lock** briefly to take a snapshot of your screen. You can change the shortcut and how long you need to hold it in Settings, or turn the shortcut off and open the app from the tray instead.
-2. Click a word to select it, or drag across words to select a longer passage. This works with text in images and other places where normal text selection doesn't work. To select an area, start dragging from an empty part of the screen. The app will select any text it finds there, or the image itself if it finds none.
+2. Click a word to select it, or drag across words to select a passage. This works with text in images and other places where normal text selection doesn't work. To select an area, start dragging from an empty part of the screen. The app will select any text it finds there, or the image itself if it finds none.
 3. Choose what to do with your selection: **Copy text**, **Copy image**, **Search text**, or **Translate**.
 
-The default **Smart** mode handles most selections. Use **Text** if you want to pick individual recognized words, **Rectangle** to draw a box, or **Lasso** to draw around an area. The toolbar shows Smart and Text; the keyboard shortcuts below give you all four modes.
+The default **Smart** mode selects whole words. In **Text** mode, click or drag across individual recognized characters when character positions are available. Use **Rectangle** to draw a box or **Lasso** to draw around an area. The toolbar shows Smart and Text; the keyboard shortcuts below give you all four modes.
 
 | Key | What it does |
 | --- | --- |
 | `A`, `T`, `R`, `L` | Switch to Smart, Text, Rectangle, or Lasso |
-| Arrow keys | Move between recognized words |
-| `Enter` | Select the focused word |
+| Arrow keys | Move between recognized words; in Text mode, Left/Right move by character |
+| `Shift` + arrow keys | Extend or contract a character selection in Text mode |
+| `Enter` | Select the focused word or character |
 | `Ctrl+Z` | Undo the last selection |
 | `Delete` | Clear the selection |
 | `Esc` | Close the capture screen |
@@ -92,7 +93,7 @@ python3 linux/screen_to_search.py --check
 python3 linux/screen_to_search.py --install-desktop
 ```
 
-Launch **Screen to Search** from your desktop's app launcher. The install step copies the scripts and v6 models into your local data directory and creates a desktop identity for portal permissions. Hold the assigned shortcut for the duration configured in Settings (350 ms by default), or choose **Capture** from the indicator or Settings. A darkened fullscreen overlay opens on each monitor. Click or drag across words, use Rectangle or Lasso, then choose **Copy text**, **Copy image**, **Search text**, or **Translate**. Settings also controls search engine, translation language, shortcut enablement, and launch at sign-in.
+Launch **Screen to Search** from your desktop's app launcher. The install step copies the scripts and v6 models into your local data directory and creates a desktop identity for portal permissions. Hold the assigned shortcut for the duration configured in Settings (350 ms by default), or choose **Capture** from the indicator or Settings. A darkened fullscreen overlay opens on each monitor. In Smart mode, click or drag across whole words; Text mode can select individual recognized characters. Use Rectangle or Lasso to select an area, then choose **Copy text**, **Copy image**, **Search text**, or **Translate**. Settings also controls search engine, translation language, shortcut enablement, and launch at sign-in.
 
 | Session | Fullscreen capture | Hold shortcut |
 | --- | --- | --- |
@@ -114,7 +115,7 @@ Other compositors with press and release bindings can call the same two commands
 
 ## macOS
 
-The native macOS menu bar app requires macOS 14 or newer. It captures each display with ScreenCaptureKit, uses the bundled PP-OCRv6 models for word selection, and offers Smart, Text, Rectangle, and Lasso modes. Copy text or an image, search, and translate from the fullscreen overlay. The hold shortcut defaults to **Control+Option+Space**; the menu bar icon lets you change it to F8, F9, F10, or Caps Lock and adjust the hold duration.
+The native macOS menu bar app requires macOS 14 or newer. It captures each display with ScreenCaptureKit, uses the bundled PP-OCRv6 models for word selection, and offers Smart, Text, Rectangle, and Lasso modes. Smart mode selects whole words; Text mode can select individual recognized characters. Copy text or an image, search, and translate from the fullscreen overlay. The hold shortcut defaults to **Control+Option+Space**; the menu bar icon lets you change it to F8, F9, F10, or Caps Lock and adjust the hold duration.
 
 To build a `.app` from source on a Mac, install Xcode command line tools and Python 3, then run from the repository root:
 

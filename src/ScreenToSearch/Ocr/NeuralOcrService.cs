@@ -35,14 +35,14 @@ internal sealed class NeuralOcrService
     private static long _lastUse;
 
     public async Task<OcrDocument> RecognizeAsync(byte[] image, CancellationToken cancellationToken = default,
-        int maxSide = 0)
+        int maxSide = 0, bool includeCharacters = false)
     {
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         IdleTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         try
         {
             // Model initialization also belongs off the UI thread on a cold first use.
-            return await Task.Run(() => RecognizeCoreAsync(image, maxSide, cancellationToken), cancellationToken)
+            return await Task.Run(() => RecognizeCoreAsync(image, maxSide, includeCharacters, cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
@@ -53,7 +53,7 @@ internal sealed class NeuralOcrService
         }
     }
 
-    private static async Task<OcrDocument> RecognizeCoreAsync(byte[] image, int maxSide,
+    private static async Task<OcrDocument> RecognizeCoreAsync(byte[] image, int maxSide, bool includeCharacters,
         CancellationToken cancellationToken)
     {
         var engine = GetEngine();
@@ -62,7 +62,8 @@ internal sealed class NeuralOcrService
             ?? throw new InvalidOperationException("The OCR image could not be decoded.");
         var options = RapidOcrOptions.PPOCRv6 with
         {
-            ReturnWordBox = true
+            ReturnWordBox = true,
+            ReturnWordCharacters = includeCharacters
         };
         if (maxSide > 0) options = options with { ImgResize = maxSide };
         var result = await engine.DetectAsync(bitmap, options, null, cancellationToken)
@@ -79,12 +80,12 @@ internal sealed class NeuralOcrService
                 for (var i = 0; i < wordResults!.Length; i++)
                 {
                     var word = wordResults[i];
-                    var x0 = word.BoxPoints.Min(point => point.X);
-                    var y0 = word.BoxPoints.Min(point => point.Y);
-                    var x1 = word.BoxPoints.Max(point => point.X);
-                    var y1 = word.BoxPoints.Max(point => point.Y);
-                    words.Add(new OcrWord(word.Text, new PixelBounds(x0, y0, x1 - x0, y1 - y0),
-                        spaces[i]));
+                    var characters = word.Characters?.Select(character => new OcrCharacter(character.Text,
+                        CharacterBoundsFor(character.BoxPoints))).ToArray();
+                    if (characters is not null
+                        && string.Concat(characters.Select(character => character.Text)) != word.Text)
+                        characters = null;
+                    words.Add(new OcrWord(word.Text, BoundsFor(word.BoxPoints), spaces[i], characters));
                 }
             if (words.Count == 0) continue;
             var left = words.Min(word => word.Bounds.X);
@@ -128,6 +129,29 @@ internal sealed class NeuralOcrService
                 new PixelBounds(left, top, right - left, bottom - top), words);
         }).OrderBy(line => line.Bounds.Y).ToArray();
         return new OcrDocument(string.Join(Environment.NewLine, merged.Select(line => line.Text)), merged);
+    }
+
+    private static PixelBounds BoundsFor(SKPointI[] points)
+    {
+        var left = points[0].X;
+        var right = left;
+        var top = points[0].Y;
+        var bottom = top;
+        for (var i = 1; i < points.Length; i++)
+        {
+            left = Math.Min(left, points[i].X);
+            right = Math.Max(right, points[i].X);
+            top = Math.Min(top, points[i].Y);
+            bottom = Math.Max(bottom, points[i].Y);
+        }
+        return new PixelBounds(left, top, right - left, bottom - top);
+    }
+
+    private static PixelBounds CharacterBoundsFor(SKPointI[] points)
+    {
+        var bounds = BoundsFor(points);
+        // Rounding very small OCR cells can collapse an edge to zero pixels.
+        return bounds with { Width = Math.Max(1, bounds.Width), Height = Math.Max(1, bounds.Height) };
     }
 
     private static bool SameRow(PixelBounds first, PixelBounds second)

@@ -8,7 +8,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import screen_to_search as app
 import desktop_backends
-from word_selection import Word, bounds_for_indices, monitor_crops, text_for_indices
+from word_selection import (Character, Word, WordIndex, bounds_for_indices, character_at,
+                            character_range_words, monitor_crops, move_character,
+                            text_for_character_range, text_for_indices)
 import v6_ocr
 
 
@@ -141,6 +143,68 @@ class LinuxAppTests(unittest.TestCase):
             words = v6_ocr.recognize_words(b"png")
         self.assertEqual([word.text for word in words], ["Hello", "world"])
         self.assertEqual(bounds_for_indices(words, {0, 1}), (10, 20, 60, 30))
+
+    def test_character_boxes_form_words_without_losing_text(self):
+        def targets(text):
+            boxes = [(char, 0.9, [[index * 10, 0], [index * 10 + 8, 0],
+                                  [index * 10 + 8, 15], [index * 10, 15]])
+                     for index, char in enumerate(text) if not char.isspace()]
+            return v6_ocr._line_targets(text, boxes, 0)
+
+        for source, expected in (("one two three four five six seven eight nine ten",
+                                  ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]),
+                                 ("CLABE:123456789", ["CLABE:", "123456789"]),
+                                 ("account=123456789", ["account=", "123456789"]),
+                                 ("order-id=12345", ["order-id=", "12345"]),
+                                 ("https://example.com", ["https://example.com"]),
+                                 ("12:30", ["12:30"]),
+                                 ("English 中文", ["English", "中", "文"])):
+            with self.subTest(source=source):
+                words = targets(source)
+                self.assertEqual([word.text for word in words], expected)
+                self.assertEqual(text_for_indices(words, range(len(words))), source)
+                self.assertTrue(all(word.characters for word in words if len(word.text) > 1))
+
+    def test_missing_character_alignment_falls_back_to_original_line(self):
+        class Result:
+            boxes = [[[10, 20], [100, 20], [100, 35], [10, 35]]]
+            txts = ["Hello world"]
+            word_results = [[("X", 0.9, [[10, 20], [20, 20], [20, 35], [10, 35]])]]
+
+        with patch.object(v6_ocr, "_run_ocr", return_value=Result()):
+            words = v6_ocr.recognize_words(b"png")
+        self.assertEqual([word.text for word in words], ["Hello world"])
+        self.assertEqual(text_for_indices(words, {0}), "Hello world")
+
+    def test_word_offset_preserves_character_geometry_and_spacing(self):
+        word = Word("ab", 50, 60, 20, 10, (0, 0, 0), False,
+                    (Character("a", 50, 60, 8, 10), Character("b", 60, 60, 10, 10)))
+        shifted = word.offset(-30, -40)
+        self.assertEqual((shifted.x, shifted.y, shifted.space_before), (20, 20, False))
+        self.assertEqual([(c.x, c.y) for c in shifted.characters], [(20, 20), (30, 20)])
+
+    def test_character_range_respects_word_spacing_and_reverse_selection(self):
+        def word(text, x, space):
+            chars = tuple(Character(char, x + i * 10, 10, 8, 12) for i, char in enumerate(text))
+            return Word(text, x, 10, len(text) * 10 - 2, 12, (0, 0, 0), space, chars)
+        words = [word("CIRCLE", 0, None), word("IMAGE", 70, True)]
+        self.assertEqual(character_at(words[0], 34, 15), 3)
+        self.assertEqual(text_for_character_range(words, (0, 3), (1, 2)), "CLE IMA")
+        self.assertEqual(text_for_character_range(words, (1, 2), (0, 3)), "CLE IMA")
+        self.assertEqual(bounds_for_indices(character_range_words(words, (0, 3), (1, 2)), {0, 1}),
+                         (30, 10, 98, 22))
+        self.assertEqual(move_character(words, (0, 5), 1), (1, 0))
+        self.assertEqual(move_character(words, (1, 0), -1), (0, 5))
+
+    def test_word_index_prefers_actual_target_and_handles_cell_edges(self):
+        words = [Word("A", -5, -3, 12, 15, (0, 0, 0)),
+                 Word("B", 90, 90, 20, 20, (0, 0, 1)),
+                 Word("C", 110, 90, 12, 20, (0, 0, 1))]
+        index = WordIndex(words)
+        self.assertEqual(index.word_at(111, 100), 2)
+        self.assertEqual(index.word_at(128, 100, extend=True), 2)
+        self.assertEqual(index.word_at(-4, 0), 0)
+        self.assertIsNone(index.word_at(300, 300))
 
     def test_clipboard_passes_png_bytes_to_wayland_tool(self):
         with patch.dict(os.environ, {"WAYLAND_DISPLAY": "wayland-0"}), \
