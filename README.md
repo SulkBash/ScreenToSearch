@@ -4,6 +4,12 @@
 
 Want to copy text from a screenshot or look up something you spotted in an app? Screen to Search lets you select what's on your display, even when the app you're looking at won't let you highlight it. Copy text or an image, search for selected text, or open it in Google Translate.
 
+## See it in action
+
+![Animated Windows walkthrough: select text or an image, then copy, search, or translate](docs/media/illustrated-walkthrough.gif)
+
+This animated reconstruction of the Windows interface shows the default shortcut, text and area selection, and all four actions. [Watch the MP4](docs/media/screen-to-search-demo.mp4) · [Image credits](docs/media/README.md).
+
 ## Windows
 
 ### Get started
