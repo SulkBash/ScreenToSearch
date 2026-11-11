@@ -129,6 +129,27 @@ internal static class StageTwoSelfTest
                 throw new InvalidOperationException("English paragraph selection was not word-precise.");
             results["preciseEnglishSelection"] = new { tap = "restore", drag = "to restore the" };
 
+            const string sentence = "one two three four five six seven eight nine ten";
+            using var wordSample = new Bitmap(1100, 90);
+            using (var graphics = Graphics.FromImage(wordSample))
+            {
+                graphics.Clear(Color.White);
+                using var font = new Font("Arial", 28, FontStyle.Regular, GraphicsUnit.Pixel);
+                graphics.DrawString(sentence, font, Brushes.Black, 20, 15);
+            }
+            using var wordPng = new MemoryStream();
+            wordSample.Save(wordPng, ImageFormat.Png);
+            var sentenceHits = OcrSelection.Flatten(await new ScreenOcrPipeline().RecognizeAsync(wordPng.ToArray()));
+            if (!sentenceHits.Select(hit => hit.Word.Text).SequenceEqual(sentence.Split(' ')))
+                throw new InvalidOperationException("OCR merged separate words into a single selection target: "
+                    + string.Join(" | ", sentenceHits.Select(hit => hit.Word.Text)));
+            var sentenceGroups = TextLayout.Build(sentenceHits);
+            var fourth = sentenceGroups.Single(group => group.WordIndices.Contains(3));
+            if (OcrSelection.TapRange(sentenceHits, fourth, 3, preciseMode: false) != (3, 3)
+                || OcrSelection.TextBetween(sentenceHits, 3, 5) != "four five six")
+                throw new InvalidOperationException("Smart word selection expanded beyond the intended words.");
+            results["separateWordTargets"] = sentenceHits.Count;
+
             // Some fonts cause OCR to omit the space after the label. Exercise the
             // real word boxes, including an explicitly unspaced label and value.
             const string accountNumber = "123456789123456789";
@@ -175,6 +196,83 @@ internal static class StageTwoSelfTest
                 || !labelDocument.Lines[4].Words.Select(word => word.Text).SequenceEqual(["https://example.com"]))
                 throw new InvalidOperationException($"Colon-separated text changed unexpectedly: {labelDocument.Text}");
             results["colonSeparatedSelection"] = new { accountNumber, fullText = labelDocument.Lines[1].Text };
+
+            var numberIndex = Enumerable.Range(0, labelHits.Count).Single(index =>
+                labelHits[index].LineIndex == 1 && labelHits[index].Word.Text == accountNumber);
+            var labelIndex = Enumerable.Range(0, labelHits.Count).Single(index =>
+                labelHits[index].LineIndex == 1 && labelHits[index].Word.Text == "CLABE:");
+            var urlIndex = Enumerable.Range(0, labelHits.Count).Single(index =>
+                labelHits[index].LineIndex == 4 && labelHits[index].Word.Text == "https://example.com");
+            var numberWord = labelHits[numberIndex].Word;
+            var urlWord = labelHits[urlIndex].Word;
+            if (numberWord.Characters?.Count != accountNumber.Length
+                || urlWord.Characters?.Count != urlWord.Text.Length)
+                throw new InvalidOperationException("OCR did not return character positions inside words.");
+            for (var i = 0; i < numberWord.Characters.Count; i++)
+                CheckCharacterHit(labelHits, numberIndex, i);
+            for (var i = 0; i < urlWord.Characters.Count; i++)
+                CheckCharacterHit(labelHits, urlIndex, i);
+            var partialNumber = OcrTextRange.Between(new(numberIndex, 2), new(numberIndex, 8));
+            var reverseNumber = OcrTextRange.Between(new(numberIndex, 8), new(numberIndex, 2));
+            var partialUrl = OcrTextRange.Between(new(urlIndex, 8), new(urlIndex, 14));
+            var crossWords = OcrTextRange.Between(new(labelIndex, 3), new(numberIndex, 4));
+            if (partialNumber != reverseNumber
+                || RangeText(labelHits, partialNumber) != accountNumber.Substring(2, 7)
+                || RangeText(labelHits, partialUrl) != "example"
+                || RangeText(labelHits, crossWords) != "BE:12345")
+                throw new InvalidOperationException("Character selection did not preserve the intended text.");
+
+            var screenHits = OcrSelection.Flatten(screen);
+            var circleIndex = Enumerable.Range(0, screenHits.Count).Single(index => screenHits[index].Word.Text == "CIRCLE");
+            var imageIndex = Enumerable.Range(0, screenHits.Count).Single(index => screenHits[index].Word.Text == "IMAGE");
+            var spacedRange = OcrTextRange.Between(new(circleIndex, 3), new(imageIndex, 2));
+            if (RangeText(screenHits, spacedRange) != "CLE IMA")
+                throw new InvalidOperationException("Character selection lost the space between words.");
+            var lastOfCircle = new OcrTextPosition(circleIndex,
+                OcrSelection.CharacterCount(screenHits[circleIndex].Word) - 1);
+            var firstOfImage = OcrSelection.MoveCharacter(screenHits, lastOfCircle, 1);
+            if (firstOfImage != new OcrTextPosition(imageIndex, 0)
+                || OcrSelection.MoveCharacter(screenHits, firstOfImage, -1) != lastOfCircle
+                || RangeText(screenHits, OcrTextRange.Between(lastOfCircle, firstOfImage)) != "E I")
+                throw new InvalidOperationException("Character navigation failed across a word boundary.");
+            var projected = new OcrDocumentBuilder(new OcrDocument("", []));
+            projected.Add(new OcrDocument("", [labelDocument.Lines[1]]), new Rectangle(30, 40, 900, 360));
+            var projectedNumber = projected.Build().Lines.Single().Words.Single(word => word.Text == accountNumber);
+            if (projectedNumber.Characters is null || projectedNumber.SpaceBefore != numberWord.SpaceBefore
+                || projectedNumber.Characters[0].Bounds.X != numberWord.Characters[0].Bounds.X + 30
+                || projectedNumber.Characters[0].Bounds.Y != numberWord.Characters[0].Bounds.Y + 40)
+                throw new InvalidOperationException("Small-text OCR lost character coordinates or spacing.");
+            var adjacentHits = OcrSelection.Flatten(new OcrDocument("", [new OcrLine("AB",
+                new PixelBounds(10, 10, 20, 10), [new OcrWord("A", new PixelBounds(10, 10, 10, 10)),
+                    new OcrWord("B", new PixelBounds(20, 10, 10, 10))])]));
+            if (OcrSelection.WordAt(adjacentHits, new Point(21, 15)) != 1)
+                throw new InvalidOperationException("An inflated neighboring hit target hid the intended word.");
+            var hitIndex = new OcrHitIndex(adjacentHits);
+            for (var x = 0; x < 50; x++)
+                for (var y = 5; y < 25; y++)
+                    foreach (var extend in new[] { false, true })
+                        if (hitIndex.WordAt(new Point(x, y), extend)
+                            != OcrSelection.WordAt(adjacentHits, new Point(x, y), extend))
+                            throw new InvalidOperationException("Indexed hit testing changed the selected word.");
+            if (hitIndex.WordAt(new Point(36, 15), extendHorizontally: true) != 1)
+                throw new InvalidOperationException("A drag ending just after the text lost its endpoint.");
+            var edgeHits = new[]
+            {
+                new OcrHit(new OcrWord("A", new PixelBounds(-5, -3, 12, 15)), 0),
+                new OcrHit(new OcrWord("B", new PixelBounds(90, 90, 20, 20)), 1),
+                new OcrHit(new OcrWord("C", new PixelBounds(192, 96, 12, 20)), 1)
+            };
+            var edgeIndex = new OcrHitIndex(edgeHits);
+            for (var x = -40; x <= 230; x += 3)
+                for (var y = -20; y <= 130; y += 5)
+                    foreach (var extend in new[] { false, true })
+                        if (edgeIndex.WordAt(new Point(x, y), extend)
+                            != OcrSelection.WordAt(edgeHits, new Point(x, y), extend))
+                            throw new InvalidOperationException("A hit target was lost at a spatial index boundary.");
+            VerifySurfaceGestures(labelDocument, labelPng.ToArray(), numberIndex, urlIndex);
+            VerifyCharacterScores();
+            results["characterSelection"] = new { partialNumber = RangeText(labelHits, partialNumber),
+                partialUrl = RangeText(labelHits, partialUrl), acrossWords = RangeText(screenHits, spacedRange) };
 
             var hits = OcrSelection.Flatten(recognized);
             var selectedText = OcrSelection.TextBetween(hits, 0, hits.Count - 1);
@@ -235,5 +333,131 @@ internal static class StageTwoSelfTest
         await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(results,
             new JsonSerializerOptions { WriteIndented = true }));
         return results["passed"] is true ? 0 : 1;
+    }
+
+    private static string RangeText(IReadOnlyList<OcrHit> hits, OcrTextRange range) =>
+        OcrSelection.TextForRange(hits, range, OcrSelection.Slice(hits, range));
+
+    private static void CheckCharacterHit(IReadOnlyList<OcrHit> hits, int wordIndex, int characterIndex)
+    {
+        var point = CharacterCenter(hits[wordIndex].Word, characterIndex);
+        if (OcrSelection.WordAt(hits, point) != wordIndex
+            || OcrSelection.PositionAt(hits, wordIndex, point) != new OcrTextPosition(wordIndex, characterIndex))
+            throw new InvalidOperationException($"Character hit testing failed at {wordIndex}:{characterIndex}.");
+    }
+
+    private static Point CharacterCenter(OcrWord word, int index)
+    {
+        var bounds = word.Characters![index].Bounds;
+        return new Point((int)Math.Round(bounds.X + bounds.Width / 2),
+            (int)Math.Round(bounds.Y + bounds.Height / 2));
+    }
+
+    private static void VerifySurfaceGestures(OcrDocument document, byte[] image, int numberIndex, int urlIndex)
+    {
+        var monitor = new MonitorInfo("test", new Rectangle(0, 0, 900, 360), true, 96, 96, 0);
+        using var surface = new CaptureSurface(new MonitorFrame(monitor, image, TimeSpan.Zero), new AppSettings());
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(CaptureSurface);
+        type.GetField("_lines", flags)!.SetValue(surface, document.Lines);
+        type.GetMethod("RebuildTextTargets", flags)!.Invoke(surface, null);
+        var down = type.GetMethod("OnMouseDown", flags)!;
+        var move = type.GetMethod("OnMouseMove", flags)!;
+        var up = type.GetMethod("OnMouseUp", flags)!;
+        var selection = type.GetField("_selection", flags)!;
+        string CurrentText()
+        {
+            var selected = selection.GetValue(surface)
+                ?? throw new InvalidOperationException("The overlay did not select text.");
+            return (string)selected.GetType().GetProperty("Text")!.GetValue(selected)!;
+        }
+        string Gesture(Point first, Point last)
+        {
+            down.Invoke(surface, [new System.Windows.Forms.MouseEventArgs(
+                System.Windows.Forms.MouseButtons.Left, 1, first.X, first.Y, 0)]);
+            up.Invoke(surface, [new System.Windows.Forms.MouseEventArgs(
+                System.Windows.Forms.MouseButtons.Left, 1, last.X, last.Y, 0)]);
+            return CurrentText();
+        }
+
+        var hits = OcrSelection.Flatten(document);
+        var number = hits[numberIndex].Word;
+        var url = hits[urlIndex].Word;
+        var first = CharacterCenter(number, 2);
+        var last = CharacterCenter(number, 8);
+        down.Invoke(surface, [new System.Windows.Forms.MouseEventArgs(
+            System.Windows.Forms.MouseButtons.Left, 1, first.X, first.Y, 0)]);
+        move.Invoke(surface, [new System.Windows.Forms.MouseEventArgs(
+            System.Windows.Forms.MouseButtons.Left, 0, last.X, last.Y, 0)]);
+        using (var preview = new Bitmap(900, 360))
+        using (var graphics = Graphics.FromImage(preview))
+        {
+            type.GetMethod("OnPaint", flags)!.Invoke(surface,
+                [new System.Windows.Forms.PaintEventArgs(graphics, new Rectangle(0, 0, 900, 360))]);
+            var selectedPoint = CharacterCenter(number, 0);
+            var pixel = preview.GetPixel(selectedPoint.X, selectedPoint.Y);
+            if (pixel.B <= pixel.R)
+                throw new InvalidOperationException("Smart mode did not preview the whole word.");
+        }
+        up.Invoke(surface, [new System.Windows.Forms.MouseEventArgs(
+            System.Windows.Forms.MouseButtons.Left, 1, last.X, last.Y, 0)]);
+        var label = hits[numberIndex - 1].Word;
+        if (Gesture(first, last) != number.Text || Gesture(last, first) != number.Text
+            || Gesture(first, first) != number.Text
+            || Gesture(CharacterCenter(url, 8), CharacterCenter(url, 14)) != url.Text
+            || Gesture(CharacterCenter(label, 3), CharacterCenter(number, 4)) != "CLABE:" + number.Text)
+            throw new InvalidOperationException("Smart mode did not select whole words.");
+        type.GetMethod("SetMode", flags)!.Invoke(surface, [SelectionMode.Text]);
+        if (Gesture(first, last) != "3456789" || Gesture(last, first) != "3456789"
+            || Gesture(CharacterCenter(url, 8), CharacterCenter(url, 14)) != "example")
+            throw new InvalidOperationException("Text mode did not select the intended characters.");
+        if (Gesture(first, first) != "3")
+            throw new InvalidOperationException("Text mode did not select one character on tap.");
+        var keyDown = type.GetMethod("OnKeyDown", flags)!;
+        keyDown.Invoke(surface, [new System.Windows.Forms.KeyEventArgs(
+            System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.Right)]);
+        if (CurrentText() != "34")
+            throw new InvalidOperationException("Shift and arrow did not extend character selection.");
+        keyDown.Invoke(surface, [new System.Windows.Forms.KeyEventArgs(
+            System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.Right)]);
+        if (CurrentText() != "345")
+            throw new InvalidOperationException("Keyboard selection did not retain its anchor.");
+        keyDown.Invoke(surface, [new System.Windows.Forms.KeyEventArgs(
+            System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.Left)]);
+        if (CurrentText() != "34")
+            throw new InvalidOperationException("Keyboard selection did not contract toward its anchor.");
+    }
+
+    private static void VerifyCharacterScores()
+    {
+        var assembly = typeof(RapidOcrNet.TextLine).Assembly;
+        var cropType = assembly.GetType("RapidOcrNet.CropContext")!;
+        var crop = Activator.CreateInstance(cropType, 0, 0, 120, 30, SkiaSharp.SKMatrix.Identity, false, false)!;
+        var build = assembly.GetType("RapidOcrNet.CalRecBoxes")!.GetMethod("Build")!;
+        var line = new RapidOcrNet.TextLine
+        {
+            Chars = ["A", " ", "B", "C"],
+            CharScores = [0.91f, 0.01f, 0.8f, 0.6f],
+            CharCols = [2, 4, 6, 8],
+            ColCount = 20
+        };
+        var boxes = (RapidOcrNet.WordBox[])build.Invoke(null, [line, crop, false, false, true])!;
+        if (boxes.Length != 2 || boxes[1].Text != "BC" || Math.Abs(boxes[1].Score - 0.7f) > 0.001f
+            || boxes[1].Characters is not { Length: 2 } characters
+            || Math.Abs(characters[0].Score - 0.8f) > 0.001f
+            || Math.Abs(characters[1].Score - 0.6f) > 0.001f)
+            throw new InvalidOperationException("Character confidence scores shifted after whitespace.");
+        const string field = "account=123456789";
+        var joined = new RapidOcrNet.TextLine
+        {
+            Chars = field.Select(character => character.ToString()).ToArray(),
+            CharScores = Enumerable.Repeat(0.9f, field.Length).ToArray(),
+            CharCols = Enumerable.Range(1, field.Length).Select(index => index * 2).ToArray(),
+            ColCount = field.Length * 2 + 2
+        };
+        boxes = (RapidOcrNet.WordBox[])build.Invoke(null, [joined, crop, false, false, true])!;
+        if (!boxes.Select(box => box.Text).SequenceEqual(["account=", "123456789"]))
+            throw new InvalidOperationException("A joined label and value did not produce separate word targets.");
     }
 }

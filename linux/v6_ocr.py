@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import threading
 
-from word_selection import Word, text_for_indices
+from word_selection import Character, Word, is_cjk, text_for_indices
 
 
 def model_dir():
@@ -74,7 +74,7 @@ def _release_idle_engine(generation):
             _idle_timer = None
 
 
-def _run_ocr(image):
+def _run_ocr(image, include_characters=False):
     global _engine, _idle_timer, _generation
     # Screen and crop OCR can arrive on different threads. Never run or unload
     # the shared engine concurrently: RapidOCR mutates its per-request state.
@@ -86,7 +86,8 @@ def _run_ocr(image):
         try:
             if _engine is None:
                 _engine = _create_engine()
-            return _engine(image, use_cls=False, return_word_box=True)
+            return _engine(image, use_cls=False, return_word_box=True,
+                           return_single_char_box=include_characters)
         finally:
             if _engine is not None:
                 _idle_timer = threading.Timer(IDLE_SECONDS, _release_idle_engine, (_generation,))
@@ -102,19 +103,70 @@ def _bounds(polygon):
     return left, top, max(1, right - left), max(1, bottom - top)
 
 
-def recognize_words(image):
-    result = _run_ocr(image)
+def _line_targets(line_text, line_words, line_index):
+    """Reassemble recognized character boxes into selectable words in one OCR pass."""
+    result = []
+    current = []
+    scores = []
+    current_space = None
+    offset = 0
+
+    def flush():
+        nonlocal current, scores
+        if current and sum(scores) / len(scores) >= 0.3:
+            left = min(char.x for char in current)
+            top = min(char.y for char in current)
+            right = max(char.x + char.width for char in current)
+            bottom = max(char.y + char.height for char in current)
+            result.append(Word("".join(char.text for char in current), left, top,
+                               right - left, bottom - top, (0, 0, line_index),
+                               current_space, tuple(current) if len(current) > 1 else ()))
+        current = []
+        scores = []
+
+    for text, score, polygon in line_words:
+        if not text or polygon is None or text.isspace():
+            continue
+        found = line_text.find(text, offset)
+        between = line_text[offset:found] if found >= 0 else ""
+        space = bool(between) and between.isspace()
+        # If alignment is incomplete, keep the tokens separate rather than inventing text.
+        uncertain = found < 0 or bool(between) and not between.isspace()
+        if found >= 0:
+            offset = found + len(text)
+        is_cjk_token = len(text) == 1 and is_cjk(text)
+        after_label = (len(current) > 1 and current[-1].text in (":", "=")
+                       and text[0].isalnum()
+                       and any(char.text.isalpha() for char in current[:-1])
+                       and all(char.text.isalnum() or char.text in ("-", "_") for char in current[:-1]))
+        if current and (space or uncertain or is_cjk_token or after_label or len(text) > 1):
+            flush()
+        if not current:
+            current_space = None if not result or uncertain else space
+        current.append(Character(text, *_bounds(polygon)))
+        scores.append(float(score))
+        # Existing word-level outputs and CJK glyphs are already indivisible targets.
+        if len(text) > 1 or is_cjk_token:
+            flush()
+    flush()
+    return result
+
+
+def recognize_words(image, *, include_characters=True):
+    result = _run_ocr(image, include_characters=include_characters)
     if result.boxes is None or result.txts is None:
         return []
     words = []
     for index, (box, line_text) in enumerate(zip(result.boxes, result.txts)):
         line_words = result.word_results[index] if result.word_results and index < len(result.word_results) else ()
         if line_words:
-            for text, score, polygon in line_words:
-                if not text or polygon is None or score < 0.3:
-                    continue
-                words.append(Word(text, *_bounds(polygon), (0, 0, index)))
-        elif line_text.strip():
+            targets = _line_targets(line_text, line_words, index)
+            # Some OCR versions omit/misalign box entries; never silently copy
+            # a different line or drop characters just to gain finer targets.
+            if "".join("".join(word.text.split()) for word in targets) == "".join(line_text.split()):
+                words.extend(targets)
+                continue
+        if line_text.strip():
             # Some model outputs lack word alignment. Keep the line selectable.
             words.append(Word(line_text.strip(), *_bounds(box), (0, 0, index)))
     rows = []
@@ -129,11 +181,12 @@ def recognize_words(image):
                 break
         else:
             rows.append([word])
-    return [Word(word.text, word.x, word.y, word.width, word.height, (0, 0, index))
+    return [Word(word.text, word.x, word.y, word.width, word.height, (0, 0, index),
+                 word.space_before, word.characters)
             for index, row in enumerate(rows)
             for word in sorted(row, key=lambda item: item.x)]
 
 
 def recognize_text(image):
-    words = recognize_words(image)
+    words = recognize_words(image, include_characters=False)
     return text_for_indices(words, range(len(words)))

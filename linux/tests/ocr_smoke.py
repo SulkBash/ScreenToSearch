@@ -20,6 +20,14 @@ assert v6_ocr._engine is None, "OCR loaded before the first request"
 v6_ocr.IDLE_SECONDS = 0.5  # Exercise the real timer without waiting a minute in CI.
 text = recognize_text(image)
 assert "CIRCLE" in text.upper(), f"PP-OCRv6 did not recognize smoke image: {text!r}"
+words = v6_ocr.recognize_words(image)
+circle = next(word for word in words if word.text.upper() == "CIRCLE")
+assert "".join(char.text for char in circle.characters).upper() == "CIRCLE", circle
+sentence = "one two three four five six seven eight nine ten"
+word_image = np.full((120, 1300, 3), 255, dtype=np.uint8)
+cv2.putText(word_image, sentence, (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2, cv2.LINE_AA)
+targets = v6_ocr.recognize_words(word_image)
+assert [word.text.lower() for word in targets] == sentence.split(), targets
 cached = weakref.ref(v6_ocr._engine)
 for section in ("Det", "Rec"):
     options = v6_ocr._engine.cfg[section].session.get_session_options()

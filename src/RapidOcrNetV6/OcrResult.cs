@@ -92,6 +92,9 @@ public sealed class WordBox : ITextBox
 
     public required float Score { get; init; }
 
+    /// <summary>Optional character boxes within this word, in reading order.</summary>
+    public WordBox[]? Characters { get; init; }
+
     public override string ToString()
     {
         return $"WordBox[Text({Text}),Score({Score}),[x: {BoxPoints[0].X}, y: {BoxPoints[0].Y}], [x: {BoxPoints[1].X}, y: {BoxPoints[1].Y}], [x: {BoxPoints[2].X}, y: {BoxPoints[2].Y}], [x: {BoxPoints[3].X}, y: {BoxPoints[3].Y}]]";

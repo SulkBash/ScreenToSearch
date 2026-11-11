@@ -20,7 +20,11 @@ def main():
         words = recognize_words(sys.argv[1])
     print(json.dumps([{"text": word.text, "x": word.x, "y": word.y,
                        "width": word.width, "height": word.height,
-                       "line": list(word.line)} for word in words], ensure_ascii=False))
+                       "line": list(word.line), "spaceBefore": word.space_before,
+                       "characters": [{"text": char.text, "x": char.x, "y": char.y,
+                                       "width": char.width, "height": char.height}
+                                      for char in word.characters]}
+                      for word in words], ensure_ascii=False))
 
 
 if __name__ == "__main__":

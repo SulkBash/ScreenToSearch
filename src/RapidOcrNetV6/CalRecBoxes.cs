@@ -20,7 +20,7 @@ internal sealed class WordInfo
 
     public List<WordType> WordTypes { get; } = new();
 
-    public List<float> Confs { get; } = new();
+    public List<List<float>> WordScores { get; } = new();
 
     /// <summary>
     /// Effective total column count (CTC time dimension), used for column→pixel mapping.
@@ -30,6 +30,14 @@ internal sealed class WordInfo
 
 internal static class CalRecBoxes
 {
+    private sealed class Cell(string text, float score, SKPoint[] points)
+    {
+        public string Text { get; } = text;
+        public float Score { get; } = score;
+        public SKPoint[] Points { get; } = points;
+        public List<Cell>? Characters { get; init; }
+    }
+
     /// <summary>
     /// Build per-word (or per-char) polygons for a single recognized text line and map them
     /// back to the original padded source-image coordinates.
@@ -38,7 +46,9 @@ internal static class CalRecBoxes
     /// <param name="crop">Geometry bookkeeping from <see cref="OcrUtils.GetRotateCropImage(SKBitmap, SKPointI[], out CropContext)"/>.</param>
     /// <param name="cls180">Whether the angle classifier applied a 180° flip after the crop step.</param>
     /// <param name="returnSingleCharBox">If true, emit per-char polygons even for Latin/numeric lines.</param>
-    public static WordBox[]? Build(TextLine line, in CropContext crop, bool cls180, bool returnSingleCharBox)
+    /// <param name="returnWordCharacters">If true, retain character polygons within word boxes.</param>
+    public static WordBox[]? Build(TextLine line, in CropContext crop, bool cls180,
+        bool returnSingleCharBox, bool returnWordCharacters)
     {
         if (line.Chars is null || line.CharCols is null || line.CharScores is null
             || line.Chars.Length == 0 || line.ColCount <= 0)
@@ -89,12 +99,12 @@ internal static class CalRecBoxes
 
         // Build cells in recognized-image coords.
         // Each cell is a rect [x0,0,x1,recImgHeight] expanded to 4 corners (TL, TR, BR, BL).
-        var cellsWithText = new List<(string text, float score, SKPoint[] cell)>();
-        int charIdx = 0;
+        var cellsWithText = new List<Cell>();
         for (int wIdx = 0; wIdx < info.Words.Count; wIdx++)
         {
             List<string> word = info.Words[wIdx];
             List<int> wordCols = info.WordCols[wIdx];
+            List<float> wordScores = info.WordScores[wIdx];
 
             if (perWord)
             {
@@ -139,19 +149,27 @@ internal static class CalRecBoxes
                 };
 
                 string wordText = string.Concat(word);
-                float wordScore = AverageRange(line.CharScores!, charIdx, word.Count);
-                cellsWithText.Add((wordText, wordScore, wordCell));
+                List<Cell>? characters = null;
+                if (returnWordCharacters && word.Count > 1)
+                {
+                    characters = new List<Cell>(word.Count);
+                    for (int c = 0; c < word.Count; c++)
+                        characters.Add(new Cell(word[c], wordScores[c], perCharCells[c]));
+                    AdjustBoxOverlap(characters);
+                }
+                cellsWithText.Add(new Cell(wordText, wordScores.Average(), wordCell)
+                {
+                    Characters = characters
+                });
             }
             else
             {
                 var perCharCells = BuildCellsForWord(wordCols, avgCharWidth, avgColWidth, recImgWidth, recImgHeight);
                 for (int c = 0; c < perCharCells.Count && c < word.Count; c++)
                 {
-                    cellsWithText.Add((word[c], line.CharScores![charIdx + c], perCharCells[c]));
+                    cellsWithText.Add(new Cell(word[c], wordScores[c], perCharCells[c]));
                 }
             }
-
-            charIdx += word.Count;
         }
 
         if (cellsWithText.Count == 0)
@@ -160,24 +178,36 @@ internal static class CalRecBoxes
         }
 
         // Halve horizontal overlap between neighboring cells (after sorting left-to-right).
-        cellsWithText.Sort((a, b) => a.cell[0].X.CompareTo(b.cell[0].X));
+        cellsWithText.Sort((a, b) => a.Points[0].X.CompareTo(b.Points[0].X));
         AdjustBoxOverlap(cellsWithText);
 
         // Map each cell back to original padded-source coords.
         var result = new WordBox[cellsWithText.Count];
+        var inverse = default(SKMatrix);
+        var hasInverse = crop.HasPerspective && crop.PerspectiveMatrix.TryInvert(out inverse);
         for (int i = 0; i < cellsWithText.Count; i++)
         {
-            SKPoint[] mapped = ReverseMap(cellsWithText[i].cell, in crop, cls180, recImgWidth, recImgHeight);
-            mapped = OrderPoints(mapped);
-            result[i] = new WordBox
-            {
-                Text = cellsWithText[i].text,
-                Score = cellsWithText[i].score,
-                BoxPoints = ToPointI(mapped)
-            };
+            result[i] = MapCell(cellsWithText[i], in crop, cls180, recImgWidth, recImgHeight,
+                hasInverse, in inverse);
         }
 
         return result;
+    }
+
+    private static WordBox MapCell(Cell cell, in CropContext crop, bool cls180, int width, int height,
+        bool hasInverse, in SKMatrix inverse)
+    {
+        var mapped = OrderPoints(ReverseMap(cell.Points, in crop, cls180, width, height,
+            hasInverse, in inverse));
+        WordBox[]? characters = null;
+        if (cell.Characters is { } children)
+        {
+            characters = new WordBox[children.Count];
+            for (var i = 0; i < children.Count; i++)
+                characters[i] = MapCell(children[i], in crop, cls180, width, height, hasInverse, in inverse);
+        }
+        return new WordBox { Text = cell.Text, Score = cell.Score,
+            BoxPoints = ToPointI(mapped), Characters = characters };
     }
 
     private static List<SKPoint[]> BuildCellsForWord(List<int> wordCols, float avgCharWidth, float avgColWidth,
@@ -201,12 +231,12 @@ internal static class CalRecBoxes
         return cells;
     }
 
-    private static void AdjustBoxOverlap(List<(string text, float score, SKPoint[] cell)> cells)
+    private static void AdjustBoxOverlap(List<Cell> cells)
     {
         for (int i = 0; i < cells.Count - 1; i++)
         {
-            var cur = cells[i].cell;
-            var nxt = cells[i + 1].cell;
+            var cur = cells[i].Points;
+            var nxt = cells[i + 1].Points;
             if (cur[1].X > nxt[0].X)
             {
                 float distance = MathF.Abs(cur[1].X - nxt[0].X);
@@ -220,7 +250,7 @@ internal static class CalRecBoxes
     }
 
     private static SKPoint[] ReverseMap(SKPoint[] cell, in CropContext crop, bool cls180, int recImgWidth,
-        int recImgHeight)
+        int recImgHeight, bool hasInverse, in SKMatrix inverse)
     {
         var mapped = new SKPoint[cell.Length];
         for (int i = 0; i < cell.Length; i++)
@@ -253,19 +283,11 @@ internal static class CalRecBoxes
 
             // 3. Undo perspective rectification: partImg → imgCrop.
             float cx, cy;
-            if (crop.HasPerspective)
+            if (hasInverse)
             {
-                if (crop.PerspectiveMatrix.TryInvert(out SKMatrix inv))
-                {
-                    var q = inv.MapPoint(new SKPoint(px, py));
-                    cx = q.X;
-                    cy = q.Y;
-                }
-                else
-                {
-                    cx = px;
-                    cy = py;
-                }
+                var q = inverse.MapPoint(new SKPoint(px, py));
+                cx = q.X;
+                cy = q.Y;
             }
             else
             {
@@ -339,23 +361,7 @@ internal static class CalRecBoxes
         return [pts[tl], pts[tr], pts[br], pts[bl]];
     }
 
-    private static float AverageRange(float[] values, int offset, int count)
-    {
-        if (count <= 0)
-        {
-            return 0f;
-        }
-
-        float sum = 0;
-        for (int i = 0; i < count; i++)
-        {
-            sum += values[offset + i];
-        }
-
-        return sum / count;
-    }
-
-    private static WordInfo BuildWordInfo(TextLine line, bool splitColonSeparatedValues)
+    private static WordInfo BuildWordInfo(TextLine line, bool splitLabelValues)
     {
         var info = new WordInfo
         {
@@ -376,6 +382,7 @@ internal static class CalRecBoxes
 
         var currentWord = new List<string>();
         var currentCols = new List<int>();
+        var currentScores = new List<float>();
         WordType? state = null;
 
         for (int i = 0; i < n; i++)
@@ -388,9 +395,11 @@ internal static class CalRecBoxes
                 {
                     info.Words.Add(currentWord);
                     info.WordCols.Add(currentCols);
+                    info.WordScores.Add(currentScores);
                     info.WordTypes.Add(state ?? WordType.EnNum);
                     currentWord = new List<string>();
                     currentCols = new List<int>();
+                    currentScores = new List<float>();
                 }
                 continue;
             }
@@ -400,43 +409,47 @@ internal static class CalRecBoxes
 
             int colWidth = i == 0 ? firstColWidth : (cols[i] - cols[i - 1]);
             if (state != cState || colWidth > 5
-                || splitColonSeparatedValues && StartsColonSeparatedValue(currentWord, ch))
+                || splitLabelValues && StartsLabelValue(currentWord, ch))
             {
                 if (currentWord.Count > 0)
                 {
                     info.Words.Add(currentWord);
                     info.WordCols.Add(currentCols);
+                    info.WordScores.Add(currentScores);
                     info.WordTypes.Add(state.Value);
                     currentWord = new List<string>();
                     currentCols = new List<int>();
+                    currentScores = new List<float>();
                 }
                 state = cState;
             }
 
             currentWord.Add(ch);
             currentCols.Add(cols[i]);
+            currentScores.Add(line.CharScores![i]);
         }
 
         if (currentWord.Count > 0)
         {
             info.Words.Add(currentWord);
             info.WordCols.Add(currentCols);
+            info.WordScores.Add(currentScores);
             info.WordTypes.Add(state ?? WordType.EnNum);
         }
 
-        info.Confs.AddRange(line.CharScores!);
         return info;
     }
 
-    private static bool StartsColonSeparatedValue(List<string> word, string next)
+    private static bool StartsLabelValue(List<string> word, string next)
     {
-        if (word.Count < 2 || word[^1] != ":" || next.Length == 0
+        if (word.Count < 2 || word[^1] is not (":" or "=") || next.Length == 0
             || !char.IsLetterOrDigit(next[0])) return false;
 
-        // OCR can omit the visible space after a label, making the label and value
-        // one hit target. Keep numeric expressions such as 12:30 together.
+        // Keep label/value fields independently selectable even if OCR omits a space.
+        // Numeric expressions such as 12:30 and URLs remain intact.
         var label = string.Concat(word.Take(word.Count - 1));
-        return label.Any(char.IsLetter) && label.All(char.IsLetterOrDigit);
+        return label.Any(char.IsLetter) && label.All(character =>
+            char.IsLetterOrDigit(character) || character is '-' or '_');
     }
 
     private static bool HasChineseChar(string s)

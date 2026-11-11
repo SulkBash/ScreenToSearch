@@ -19,6 +19,7 @@ internal sealed class CaptureSurface : Form
         public int FirstWord { get; init; } = -1;
         public int LastWord { get; init; } = -1;
         public IReadOnlySet<int>? SelectedWords { get; init; }
+        public OcrTextRange? CharacterRange { get; init; }
         public bool AutoClassify { get; init; }
         public string Text { get; set; } = "";
         public bool TextReady { get; set; }
@@ -37,13 +38,18 @@ internal sealed class CaptureSurface : Form
     private IReadOnlyList<OcrHit> _hits = [];
     private IReadOnlyList<OcrLine> _lines = [];
     private IReadOnlyList<TextGroup> _groups = [];
+    private int[] _wordGroups = [];
+    private OcrHitIndex _hitIndex = new([]);
     private SelectionState? _selection;
     private SelectionMode _mode = SelectionMode.Smart;
     private Point? _start;
     private int _dragWordStart = -1;
     private TextGroup? _dragGroup;
     private int _focusedWord = -1;
+    private int _focusedCharacter;
+    private OcrTextPosition? _keyboardAnchor;
     private int _hoverWord = -1;
+    private OcrTextPosition? _hoverCharacter;
     private int _hoverLine = -1;
     private int _selectionVersion;
     private bool _dragging;
@@ -152,6 +158,9 @@ internal sealed class CaptureSurface : Form
                 {
                     _lines = detailed.Lines;
                     _focusedWord = _hoverWord = _hoverLine = -1;
+                    _focusedCharacter = 0;
+                    _keyboardAnchor = null;
+                    _hoverCharacter = null;
                 }
                 else
                 {
@@ -159,8 +168,7 @@ internal sealed class CaptureSurface : Form
                     merged.Add(detailed, new Rectangle(Point.Empty, _frame.Size));
                     _lines = merged.Build().Lines;
                 }
-                _hits = OcrSelection.Flatten(new OcrDocument("", _lines));
-                _groups = TextLayout.Build(_hits);
+                RebuildTextTargets();
                 if (_selection is null)
                     SetStatus(_hits.Count == 0
                         ? "No words found. Drag an area to select its image."
@@ -178,12 +186,14 @@ internal sealed class CaptureSurface : Form
     private void SetMode(SelectionMode mode)
     {
         _mode = mode;
+        _keyboardAnchor = null;
         _hoverWord = _hoverLine = -1;
+        _hoverCharacter = null;
         Cursor = Cursors.Cross;
         SetStatus(mode switch
         {
             SelectionMode.Smart => "Smart mode: tap/sweep words or drag a text-free area to select its image.",
-            SelectionMode.Text => "Text mode: tap a word or drag across recognized words.",
+            SelectionMode.Text => "Text mode: tap a character or drag across recognized text.",
             SelectionMode.Rectangle => "Rectangle mode: drag around text or an image.",
             _ => "Lasso mode: draw around an image or text."
         });
@@ -216,39 +226,111 @@ internal sealed class CaptureSurface : Form
 
         if (_mode is SelectionMode.Smart or SelectionMode.Text)
         {
-            IReadOnlySet<int>? preview = null;
-            if (_dragging && _dragGroup is not null && _start is not null
-                && _drawing.Count > 0 && DistanceSquared(_start.Value, _drawing[^1]) < 64)
+            IReadOnlySet<int>? selectedWords = null;
+            OcrTextRange? characterRange = null;
+            if (_dragging && _dragGroup is not null && _start is not null && _drawing.Count > 0)
             {
-                var range = OcrSelection.TapRange(_hits, _dragGroup, _dragWordStart,
-                    _mode == SelectionMode.Text);
-                preview = range is { } target
-                    ? Enumerable.Range(target.First, target.Last - target.First + 1).ToHashSet()
-                    : _dragGroup.WordIndices.ToHashSet();
+                var end = _drawing[^1];
+                if (IsTap(_start.Value, end))
+                {
+                    if (_mode == SelectionMode.Text && _dragWordStart >= 0)
+                    {
+                        var position = OcrSelection.PositionAt(_hits, _dragWordStart, _start.Value);
+                        characterRange = OcrTextRange.Between(position, position);
+                    }
+                    else
+                    {
+                        var range = OcrSelection.TapRange(_hits, _dragGroup, _dragWordStart,
+                            _mode == SelectionMode.Text);
+                        selectedWords = range is { } target
+                            ? Enumerable.Range(target.First, target.Last - target.First + 1).ToHashSet()
+                            : _dragGroup.WordIndices.ToHashSet();
+                    }
+                }
+                else
+                {
+                    var endWord = FindWordAt(end, extendHorizontally: true);
+                    if (endWord >= 0)
+                    {
+                        if (_mode == SelectionMode.Smart)
+                        {
+                            var first = Math.Min(_dragWordStart, endWord);
+                            var last = Math.Max(_dragWordStart, endWord);
+                            selectedWords = Enumerable.Range(first, last - first + 1).ToHashSet();
+                        }
+                        else
+                            characterRange = OcrTextRange.Between(
+                                OcrSelection.PositionAt(_hits, _dragWordStart, _start.Value),
+                                OcrSelection.PositionAt(_hits, endWord, end));
+                    }
+                }
             }
-            using var selectedBrush = new SolidBrush(Color.FromArgb(100, 67, 132, 255));
-            for (var i = 0; i < _hits.Count; i++)
+            else if (!_dragging && _selection?.Mode == SelectionMode.Text)
             {
-                var selected = preview?.Contains(i) == true
-                    || !_dragging && _selection?.Mode == SelectionMode.Text && _selection.SelectedWords?.Contains(i) == true;
-                if (!selected && i != _hoverWord && i != _focusedWord)
-                    continue;
+                selectedWords = _selection.SelectedWords;
+                characterRange = _selection.CharacterRange;
+            }
 
-                var box = WordRectangle(_hits[i].Word);
-                if (selected)
-                    g.FillRectangle(selectedBrush, box);
-                g.DrawRectangle(Pens.White, box);
+            using var selectedBrush = new SolidBrush(Color.FromArgb(100, 67, 132, 255));
+            if (characterRange is { } selectedRange)
+            {
+                for (var i = selectedRange.First.WordIndex; i <= selectedRange.Last.WordIndex; i++)
+                {
+                    var word = _hits[i].Word;
+                    var (first, last) = OcrSelection.CharacterIndices(selectedRange, i, word);
+                    DrawHighlight(g, OcrSelection.SelectedBounds(word, first, last), selectedBrush);
+                }
             }
+            else if (selectedWords is not null)
+                foreach (var index in selectedWords)
+                    if (index >= 0 && index < _hits.Count)
+                        DrawHighlight(g, _hits[index].Word.Bounds, selectedBrush);
+
+            DrawFocus(g, _hoverWord, selectedWords, characterRange);
+            if (_focusedWord != _hoverWord) DrawFocus(g, _focusedWord, selectedWords, characterRange);
         }
 
-        if (_dragging && _start is not null && (_mode is SelectionMode.Smart or SelectionMode.Text or SelectionMode.Rectangle) && _drawing.Count > 0
-            && DistanceSquared(_start.Value, _drawing[^1]) >= 64)
-            DrawOutline(g, SelectionImage.RectangleBetween(_start.Value, _drawing[^1], _frame.Size), null);
+        if (_dragging && _start is not null && _drawing.Count > 0
+            && !IsTap(_start.Value, _drawing[^1]))
+        {
+            var areaDrag = _mode == SelectionMode.Rectangle
+                || _mode == SelectionMode.Smart && _dragGroup is null
+                || (_mode is SelectionMode.Smart or SelectionMode.Text) && _dragGroup is not null
+                    && FindWordAt(_drawing[^1], extendHorizontally: true) < 0;
+            if (areaDrag)
+                DrawOutline(g, SelectionImage.RectangleBetween(_start.Value, _drawing[^1], _frame.Size), null);
+        }
         if (_dragging && _mode == SelectionMode.Lasso && _drawing.Count > 1)
         {
             using var pen = new Pen(Color.White, 3) { DashStyle = DashStyle.Dash };
             g.DrawLines(pen, _drawing.ToArray());
         }
+    }
+
+    private static void DrawHighlight(Graphics graphics, PixelBounds bounds, Brush brush)
+    {
+        var box = BoundsRectangle(bounds);
+        graphics.FillRectangle(brush, box);
+        graphics.DrawRectangle(Pens.White, box);
+    }
+
+    private void DrawFocus(Graphics graphics, int index, IReadOnlySet<int>? selectedWords,
+        OcrTextRange? characterRange)
+    {
+        if (index < 0 || index >= _hits.Count || selectedWords?.Contains(index) == true)
+            return;
+        var word = _hits[index].Word;
+        var character = index == _hoverWord && _hoverCharacter is { } position
+            ? position.CharacterIndex : index == _focusedWord ? _focusedCharacter : -1;
+        if (characterRange is { } range && index >= range.First.WordIndex && index <= range.Last.WordIndex)
+        {
+            var (first, last) = OcrSelection.CharacterIndices(range, index, word);
+            if (_mode != SelectionMode.Text || character < 0 || character >= first && character <= last)
+                return;
+        }
+        var bounds = _mode == SelectionMode.Text && character >= 0
+            ? OcrSelection.SelectedBounds(word, character, character) : word.Bounds;
+        graphics.DrawRectangle(Pens.White, BoundsRectangle(bounds));
     }
 
     private static void DrawOutline(Graphics graphics, Rectangle bounds, IReadOnlyList<Point>? polygon)
@@ -272,20 +354,23 @@ internal sealed class CaptureSurface : Form
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
         Focus();
+        _keyboardAnchor = null;
         if (_mode is SelectionMode.Smart or SelectionMode.Text)
         {
-            _dragGroup = TextLayout.At(_groups, _hits, e.Location);
+            _dragWordStart = FindWordAt(e.Location);
+            var groupIndex = FindGroupAt(e.Location, _dragWordStart);
+            _dragGroup = groupIndex >= 0 ? _groups[groupIndex] : null;
             if (_dragGroup is null)
             {
                 _dragWordStart = -1;
             }
             else
             {
-                _dragWordStart = FindWordAt(e.Location);
                 if (_dragWordStart < 0)
                     _dragWordStart = _dragGroup.WordIndices.MinBy(index =>
                         DistanceSquared(e.Location, CenterOf(WordRectangle(_hits[index].Word))));
                 _focusedWord = _dragWordStart;
+                _focusedCharacter = OcrSelection.PositionAt(_hits, _dragWordStart, e.Location).CharacterIndex;
             }
         }
         _start = Clamp(e.Location);
@@ -302,19 +387,31 @@ internal sealed class CaptureSurface : Form
         if (!_dragging)
         {
             var hover = _mode is SelectionMode.Smart or SelectionMode.Text ? FindWordAt(e.Location) : -1;
-            var line = _mode is SelectionMode.Smart or SelectionMode.Text ? FindGroupAt(e.Location) : -1;
+            var line = _mode is SelectionMode.Smart or SelectionMode.Text ? FindGroupAt(e.Location, hover) : -1;
+            OcrTextPosition? character = _mode == SelectionMode.Text && hover >= 0
+                ? OcrSelection.PositionAt(_hits, hover, e.Location) : null;
             if (hover != _hoverWord || line != _hoverLine)
             {
                 _hoverWord = hover;
                 _hoverLine = line;
+                _hoverCharacter = character;
                 Cursor = hover >= 0 || line >= 0 ? Cursors.Hand : Cursors.Cross;
                 Invalidate();
+            }
+            else if (character != _hoverCharacter)
+            {
+                var oldBounds = HoverCharacterBounds(_hoverCharacter);
+                var newBounds = HoverCharacterBounds(character);
+                _hoverCharacter = character;
+                if (!oldBounds.IsEmpty) Invalidate(oldBounds);
+                if (!newBounds.IsEmpty) Invalidate(newBounds);
             }
             return;
         }
         var point = Clamp(e.Location);
         if (_drawing.Count > 0 && DistanceSquared(_drawing[^1], point) <= 9) return;
-        _drawing.Add(point);
+        if (_mode == SelectionMode.Lasso || _drawing.Count < 2) _drawing.Add(point);
+        else _drawing[^1] = point;
         Invalidate();
     }
 
@@ -323,6 +420,7 @@ internal sealed class CaptureSurface : Form
         base.OnMouseLeave(e);
         if (_dragging || _hoverWord < 0 && _hoverLine < 0) return;
         _hoverWord = _hoverLine = -1;
+        _hoverCharacter = null;
         Cursor = Cursors.Cross;
         Invalidate();
     }
@@ -338,11 +436,27 @@ internal sealed class CaptureSurface : Form
         {
             if (_mode is SelectionMode.Smart or SelectionMode.Text && _dragGroup is not null && _start is not null)
             {
-                var endWord = FindWordAt(end);
-                if (DistanceSquared(_start.Value, end) < 64)
-                    SelectAtPoint(_dragGroup, _dragWordStart);
+                var endWord = FindWordAt(end, extendHorizontally: true);
+                if (IsTap(_start.Value, end))
+                    SelectAtPoint(_dragGroup, _dragWordStart, _start.Value);
                 else if (endWord >= 0)
-                    SelectWords(_dragWordStart, endWord);
+                {
+                    if (_mode == SelectionMode.Smart)
+                    {
+                        _focusedWord = endWord;
+                        _focusedCharacter = OcrSelection.PositionAt(_hits, endWord, end).CharacterIndex;
+                        SelectWords(_dragWordStart, endWord);
+                    }
+                    else
+                    {
+                        var first = OcrSelection.PositionAt(_hits, _dragWordStart, _start.Value);
+                        var last = OcrSelection.PositionAt(_hits, endWord, end);
+                        _focusedWord = last.WordIndex;
+                        _focusedCharacter = last.CharacterIndex;
+                        _keyboardAnchor = first;
+                        SelectCharacters(OcrTextRange.Between(first, last));
+                    }
+                }
                 else
                 {
                     var bounds = SelectionImage.RectangleBetween(_start.Value, end, _frame.Size);
@@ -354,7 +468,7 @@ internal sealed class CaptureSurface : Form
             }
             else if (_mode == SelectionMode.Text && _start is not null)
             {
-                if (DistanceSquared(_start.Value, end) < 64)
+                if (IsTap(_start.Value, end))
                     _ = RecognizeAtPointAsync(end, _selectionVersion);
                 else SetStatus("No text found at the drag start. Try Smart or Rectangle.");
             }
@@ -403,11 +517,39 @@ internal sealed class CaptureSurface : Form
         SetStatus("Text selected. Choose an action or draw a new selection.");
     }
 
-    private void SelectAtPoint(TextGroup group, int wordIndex)
+    private void SelectAtPoint(TextGroup group, int wordIndex, Point point)
     {
+        if (_mode == SelectionMode.Text && wordIndex >= 0)
+        {
+            var position = OcrSelection.PositionAt(_hits, wordIndex, point);
+            _focusedWord = position.WordIndex;
+            _focusedCharacter = position.CharacterIndex;
+            _keyboardAnchor = position;
+            SelectCharacters(OcrTextRange.Between(position, position));
+            return;
+        }
         var range = OcrSelection.TapRange(_hits, group, wordIndex, _mode == SelectionMode.Text);
         if (range is { } selected) SelectWords(selected.First, selected.Last);
         else SelectGroup(group);
+    }
+
+    private void SelectCharacters(OcrTextRange range)
+    {
+        var words = OcrSelection.Slice(_hits, range);
+        var bounds = SelectionImage.WordBounds(words, _frame.Size);
+        if (bounds.IsEmpty) return;
+        Commit(new SelectionState
+        {
+            Mode = SelectionMode.Text,
+            Bounds = bounds,
+            ImagePng = SelectionImage.Crop(_frame, bounds),
+            FirstWord = range.First.WordIndex,
+            LastWord = range.Last.WordIndex,
+            CharacterRange = range,
+            Text = OcrSelection.TextForRange(_hits, range, words),
+            TextReady = true
+        });
+        SetStatus("Text selected. Choose an action or draw a new selection.");
     }
 
     private void SelectWords(int first, int last)
@@ -504,17 +646,24 @@ internal sealed class CaptureSurface : Form
             var area = Rectangle.Intersect(new Rectangle(Point.Empty, _frame.Size),
                 new Rectangle(point.X - 120, point.Y - 55, 240, 110));
             var crop = SelectionImage.Crop(_frame, area);
-            var result = await _cropOcr.RecognizeAsync(crop, _ocrCancellation.Token);
+            var result = await _cropOcr.RecognizeAsync(crop, _ocrCancellation.Token, includeCharacters: true);
             RunOnUi(() =>
             {
                 if (version != _selectionVersion) return;
                 var merged = new OcrDocumentBuilder(new OcrDocument("", _lines));
                 merged.Add(result, area);
                 _lines = merged.Build().Lines;
-                _hits = OcrSelection.Flatten(new OcrDocument("", _lines));
-                _groups = TextLayout.Build(_hits);
-                var target = TextLayout.At(_groups, _hits, point);
-                if (target is not null) SelectAtPoint(target, FindWordAt(point));
+                RebuildTextTargets();
+                var wordIndex = FindWordAt(point);
+                var groupIndex = FindGroupAt(point, wordIndex);
+                if (groupIndex >= 0)
+                {
+                    var group = _groups[groupIndex];
+                    if (wordIndex < 0)
+                        wordIndex = group.WordIndices.MinBy(index =>
+                            DistanceSquared(point, CenterOf(WordRectangle(_hits[index].Word))));
+                    SelectAtPoint(group, wordIndex, point);
+                }
                 else SetStatus("No text at that point. Drag around it to select the image.");
                 Invalidate();
             });
@@ -547,6 +696,7 @@ internal sealed class CaptureSurface : Form
     {
         if (_history.Count == 0) return;
         _selection = _history.Pop();
+        _keyboardAnchor = null;
         _selectionVersion++;
         _actions.Visible = _selection is not null;
         PositionActions();
@@ -561,6 +711,7 @@ internal sealed class CaptureSurface : Form
         if (_selection is null) return;
         SaveHistory();
         _selection = null;
+        _keyboardAnchor = null;
         _selectionVersion++;
         _actions.Visible = false;
         SetStatus("Selection cleared. Draw or tap again.");
@@ -605,28 +756,56 @@ internal sealed class CaptureSurface : Form
         catch (Exception ex) { SetStatus($"Action failed: {ex.Message}"); }
     }
 
-    private int FindWordAt(Point point)
+    private void RebuildTextTargets()
     {
-        for (var i = 0; i < _hits.Count; i++)
+        _hits = OcrSelection.Flatten(new OcrDocument("", _lines));
+        if (_focusedWord >= 0 && _focusedWord < _hits.Count)
+            _focusedCharacter = Math.Min(_focusedCharacter, OcrSelection.CharacterCount(_hits[_focusedWord].Word) - 1);
+        _hitIndex = new OcrHitIndex(_hits);
+        _groups = TextLayout.Build(_hits);
+        _wordGroups = new int[_hits.Count];
+        Array.Fill(_wordGroups, -1);
+        for (var group = 0; group < _groups.Count; group++)
+            foreach (var index in _groups[group].WordIndices)
+                _wordGroups[index] = group;
+    }
+
+    private int FindWordAt(Point point, bool extendHorizontally = false) =>
+        _hitIndex.WordAt(point, extendHorizontally);
+
+    private int FindGroupAt(Point point, int wordIndex)
+    {
+        if (wordIndex >= 0) return _wordGroups[wordIndex];
+        var best = -1;
+        var bestArea = long.MaxValue;
+        for (var i = 0; i < _groups.Count; i++)
         {
-            var rect = WordRectangle(_hits[i].Word);
-            rect.Inflate(3, 3);
-            if (rect.Contains(point)) return i;
+            var bounds = _groups[i].Bounds;
+            var area = (long)bounds.Width * bounds.Height;
+            bounds.Inflate(3, 3);
+            if (!bounds.Contains(point) || area >= bestArea) continue;
+            best = i;
+            bestArea = area;
         }
-        return -1;
+        return best;
     }
 
-    private int FindGroupAt(Point point)
+    private static Rectangle WordRectangle(OcrWord word) => BoundsRectangle(word.Bounds);
+
+    private Rectangle HoverCharacterBounds(OcrTextPosition? position)
     {
-        var group = TextLayout.At(_groups, _hits, point);
-        return group is null ? -1 : Enumerable.Range(0, _groups.Count)
-            .First(index => ReferenceEquals(_groups[index], group));
+        if (position is not { } target || target.WordIndex < 0 || target.WordIndex >= _hits.Count)
+            return Rectangle.Empty;
+        var bounds = BoundsRectangle(OcrSelection.SelectedBounds(_hits[target.WordIndex].Word,
+            target.CharacterIndex, target.CharacterIndex));
+        bounds.Inflate(3, 3);
+        return bounds;
     }
 
-    private static Rectangle WordRectangle(OcrWord word) => Rectangle.FromLTRB(
-        (int)Math.Floor(word.Bounds.X), (int)Math.Floor(word.Bounds.Y),
-        (int)Math.Ceiling(word.Bounds.X + word.Bounds.Width),
-        (int)Math.Ceiling(word.Bounds.Y + word.Bounds.Height));
+    private static Rectangle BoundsRectangle(PixelBounds bounds) => Rectangle.FromLTRB(
+        (int)Math.Floor(bounds.X), (int)Math.Floor(bounds.Y),
+        (int)Math.Ceiling(bounds.X + bounds.Width),
+        (int)Math.Ceiling(bounds.Y + bounds.Height));
 
     private static Point CenterOf(Rectangle bounds) =>
         new(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
@@ -636,6 +815,8 @@ internal sealed class CaptureSurface : Form
 
     private static int DistanceSquared(Point first, Point last) =>
         (first.X - last.X) * (first.X - last.X) + (first.Y - last.Y) * (first.Y - last.Y);
+
+    private static bool IsTap(Point first, Point last) => DistanceSquared(first, last) < 16;
 
     private void SetStatus(string message) => AccessibleDescription = message;
 
@@ -648,21 +829,50 @@ internal sealed class CaptureSurface : Form
         else if (e.KeyCode == Keys.T) { SetMode(SelectionMode.Text); e.Handled = true; }
         else if (e.KeyCode == Keys.R) { SetMode(SelectionMode.Rectangle); e.Handled = true; }
         else if (e.KeyCode == Keys.L) { SetMode(SelectionMode.Lasso); e.Handled = true; }
-        else if (_mode is SelectionMode.Smart or SelectionMode.Text && _hits.Count > 0 && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down)
+        else if ((_mode is SelectionMode.Smart or SelectionMode.Text) && _hits.Count > 0
+            && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down)
         {
             ActiveControl = null;
             Focus();
             var step = e.KeyCode is Keys.Left or Keys.Up ? -1 : 1;
-            _focusedWord = Math.Clamp(_focusedWord < 0 ? 0 : _focusedWord + step, 0, _hits.Count - 1);
-            if (e.Shift && _selection?.Mode == SelectionMode.Text)
+            var oldPosition = _focusedWord < 0 ? new OcrTextPosition(0, 0)
+                : new OcrTextPosition(_focusedWord, _focusedCharacter);
+            OcrTextPosition next;
+            if (_focusedWord < 0) next = oldPosition;
+            else if (_mode == SelectionMode.Text && (e.KeyCode is Keys.Left or Keys.Right))
+                next = OcrSelection.MoveCharacter(_hits, oldPosition, step);
+            else
+            {
+                var index = Math.Clamp(_focusedWord + step, 0, _hits.Count - 1);
+                next = new OcrTextPosition(index, Math.Min(_focusedCharacter,
+                    OcrSelection.CharacterCount(_hits[index].Word) - 1));
+            }
+            _focusedWord = next.WordIndex;
+            _focusedCharacter = next.CharacterIndex;
+            if (e.Shift && _mode == SelectionMode.Text)
+            {
+                _keyboardAnchor ??= oldPosition;
+                SelectCharacters(OcrTextRange.Between(_keyboardAnchor.Value, next));
+            }
+            else if (e.Shift && _selection?.Mode == SelectionMode.Text)
                 SelectWords(_selection.FirstWord, _focusedWord);
-            SetStatus($"Word {_focusedWord + 1} of {_hits.Count}: {_hits[_focusedWord].Word.Text}. Press Enter to select.");
+            else _keyboardAnchor = null;
+            var word = _hits[_focusedWord].Word;
+            var text = _mode == SelectionMode.Text && word.Characters is { } characters
+                ? characters[_focusedCharacter].Text : word.Text;
+            SetStatus($"{(_mode == SelectionMode.Text ? "Character" : "Word")}: {text}. Press Enter to select.");
             Invalidate();
             e.Handled = true;
         }
         else if (_mode is SelectionMode.Smart or SelectionMode.Text && _focusedWord >= 0 && e.KeyCode is Keys.Enter or Keys.Space && ActiveControl is not Button)
         {
-            SelectWords(_focusedWord, _focusedWord);
+            if (_mode == SelectionMode.Text)
+            {
+                var position = new OcrTextPosition(_focusedWord, _focusedCharacter);
+                _keyboardAnchor = position;
+                SelectCharacters(OcrTextRange.Between(position, position));
+            }
+            else SelectWords(_focusedWord, _focusedWord);
             e.Handled = true;
         }
         base.OnKeyDown(e);

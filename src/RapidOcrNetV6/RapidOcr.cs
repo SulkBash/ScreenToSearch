@@ -186,7 +186,7 @@ public sealed partial class RapidOcr : IDisposable
         using var input = PrepareDetectorInput(originSrc, options, cancellationToken);
         return DetectOnce(input,
             options.BoxScoreThresh, options.BoxThresh, options.UnClipRatio,
-            options.ReturnWordBox, options.ReturnSingleCharBox,
+            options.ReturnWordBox, options.ReturnSingleCharBox, options.ReturnWordCharacters,
             options.TextScore,
             options.RecMaxDegreeOfParallelism,
             progress,
@@ -391,7 +391,7 @@ public sealed partial class RapidOcr : IDisposable
 
     private OcrResult DetectOnce(in DetectorInput input, float boxScoreThresh,
         float boxThresh, float unClipRatio,
-        bool returnWordBox, bool returnSingleCharBox, float textScore,
+        bool returnWordBox, bool returnSingleCharBox, bool returnWordCharacters, float textScore,
         int recMaxDegreeOfParallelism,
         IProgress<(int Completed, int Total)>? progress = null,
         CancellationToken cancellationToken = default)
@@ -461,7 +461,8 @@ public sealed partial class RapidOcr : IDisposable
                     textLine,
                     cropContexts[i],
                     cls180: angle.Index == 1,
-                    returnSingleCharBox: returnSingleCharBox);
+                    returnSingleCharBox: returnSingleCharBox,
+                    returnWordCharacters: returnWordCharacters);
 
                 if (wordResults is not null)
                 {
@@ -469,6 +470,9 @@ public sealed partial class RapidOcr : IDisposable
                     for (int w = 0; w < wordResults.Length; w++)
                     {
                         input.MapToOriginal(wordResults[w].BoxPoints);
+                        if (wordResults[w].Characters is { } characters)
+                            foreach (var character in characters)
+                                input.MapToOriginal(character.BoxPoints);
                     }
                 }
             }

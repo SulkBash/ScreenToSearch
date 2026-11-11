@@ -1,6 +1,21 @@
 import AppKit
 import Foundation
 
+struct OCRCharacter: Decodable {
+    let text: String
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+
+    func rect(in size: CGSize, imageSize: CGSize) -> CGRect {
+        CGRect(x: x * size.width / imageSize.width,
+               y: size.height - (y + height) * size.height / imageSize.height,
+               width: width * size.width / imageSize.width,
+               height: height * size.height / imageSize.height)
+    }
+}
+
 struct OCRWord: Decodable {
     let text: String
     let x: Double
@@ -8,6 +23,20 @@ struct OCRWord: Decodable {
     let width: Double
     let height: Double
     let line: [Int]
+    let spaceBefore: Bool?
+    let characters: [OCRCharacter]?
+
+    init(text: String, x: Double, y: Double, width: Double, height: Double,
+         line: [Int], spaceBefore: Bool? = nil, characters: [OCRCharacter]? = nil) {
+        self.text = text
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.line = line
+        self.spaceBefore = spaceBefore
+        self.characters = characters
+    }
 
     func rect(in size: CGSize, imageSize: CGSize) -> CGRect {
         CGRect(x: x * size.width / imageSize.width,

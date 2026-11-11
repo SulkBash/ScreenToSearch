@@ -116,4 +116,10 @@ public sealed record RapidOcrOptions
     /// emitted at single-character granularity rather than per-word.
     /// </summary>
     public bool ReturnSingleCharBox { get; init; }
+
+    /// <summary>
+    /// When returning word boxes, also retain character boxes inside each multi-character word.
+    /// This does not run a second recognition pass.
+    /// </summary>
+    public bool ReturnWordCharacters { get; init; }
 }
