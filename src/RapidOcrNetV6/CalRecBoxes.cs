@@ -52,7 +52,9 @@ internal static class CalRecBoxes
             return null;
         }
 
-        WordInfo info = BuildWordInfo(line);
+        // CJK and explicitly requested character boxes already allow selecting the
+        // value independently, so leave their existing character geometry alone.
+        WordInfo info = BuildWordInfo(line, !returnSingleCharBox && !HasChineseChar(lineText));
         if (info.Words.Count == 0)
         {
             return null;
@@ -353,7 +355,7 @@ internal static class CalRecBoxes
         return sum / count;
     }
 
-    private static WordInfo BuildWordInfo(TextLine line)
+    private static WordInfo BuildWordInfo(TextLine line, bool splitColonSeparatedValues)
     {
         var info = new WordInfo
         {
@@ -397,7 +399,8 @@ internal static class CalRecBoxes
             state ??= cState;
 
             int colWidth = i == 0 ? firstColWidth : (cols[i] - cols[i - 1]);
-            if (state != cState || colWidth > 5)
+            if (state != cState || colWidth > 5
+                || splitColonSeparatedValues && StartsColonSeparatedValue(currentWord, ch))
             {
                 if (currentWord.Count > 0)
                 {
@@ -423,6 +426,17 @@ internal static class CalRecBoxes
 
         info.Confs.AddRange(line.CharScores!);
         return info;
+    }
+
+    private static bool StartsColonSeparatedValue(List<string> word, string next)
+    {
+        if (word.Count < 2 || word[^1] != ":" || next.Length == 0
+            || !char.IsLetterOrDigit(next[0])) return false;
+
+        // OCR can omit the visible space after a label, making the label and value
+        // one hit target. Keep numeric expressions such as 12:30 together.
+        var label = string.Concat(word.Take(word.Count - 1));
+        return label.Any(char.IsLetter) && label.All(char.IsLetterOrDigit);
     }
 
     private static bool HasChineseChar(string s)

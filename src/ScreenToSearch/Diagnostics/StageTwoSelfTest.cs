@@ -129,6 +129,53 @@ internal static class StageTwoSelfTest
                 throw new InvalidOperationException("English paragraph selection was not word-precise.");
             results["preciseEnglishSelection"] = new { tap = "restore", drag = "to restore the" };
 
+            // Some fonts cause OCR to omit the space after the label. Exercise the
+            // real word boxes, including an explicitly unspaced label and value.
+            const string accountNumber = "123456789123456789";
+            using var labels = new Bitmap(900, 360);
+            using (var graphics = Graphics.FromImage(labels))
+            {
+                graphics.Clear(Color.White);
+                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+                using var tahoma = new Font("Tahoma", 28, FontStyle.Regular, GraphicsUnit.Pixel);
+                using var arial = new Font("Arial", 24, FontStyle.Regular, GraphicsUnit.Pixel);
+                using var largeArial = new Font("Arial", 30, FontStyle.Regular, GraphicsUnit.Pixel);
+                graphics.DrawString($"CLABE: {accountNumber}", tahoma, Brushes.Black, 20, 10);
+                graphics.DrawString($"CLABE:{accountNumber}", arial, Brushes.Black, 20, 75);
+                graphics.DrawString("ORDER:ABC123", largeArial, Brushes.Black, 20, 140);
+                graphics.DrawString("12:30", largeArial, Brushes.Black, 20, 205);
+                graphics.DrawString("https://example.com", largeArial, Brushes.Black, 20, 270);
+            }
+            using var labelPng = new MemoryStream();
+            labels.Save(labelPng, ImageFormat.Png);
+            var labelDocument = await new ScreenOcrPipeline().RecognizeAsync(labelPng.ToArray());
+            var labelHits = OcrSelection.Flatten(labelDocument);
+            var labelGroups = TextLayout.Build(labelHits);
+            if (labelDocument.Lines.Count != 5)
+                throw new InvalidOperationException($"Label OCR returned unexpected lines: {labelDocument.Text}");
+            foreach (var lineIndex in new[] { 0, 1 })
+            {
+                var valueIndices = Enumerable.Range(0, labelHits.Count).Where(index =>
+                    labelHits[index].LineIndex == lineIndex && labelHits[index].Word.Text == accountNumber).ToArray();
+                if (valueIndices.Length != 1)
+                    throw new InvalidOperationException($"Label and account number share a hit target: {labelDocument.Text}");
+                var valueIndex = valueIndices[0];
+                var group = labelGroups.Single(candidate => candidate.WordIndices.Contains(valueIndex));
+                foreach (var preciseMode in new[] { false, true })
+                {
+                    var range = OcrSelection.TapRange(labelHits, group, valueIndex, preciseMode);
+                    if (range is null || OcrSelection.TextBetween(labelHits,
+                            range.Value.First, range.Value.Last) != accountNumber)
+                        throw new InvalidOperationException("Tapping the account number included its label.");
+                }
+            }
+            if (labelDocument.Lines[1].Text != $"CLABE:{accountNumber}"
+                || !labelDocument.Lines[2].Words.Select(word => word.Text).SequenceEqual(["ORDER:", "ABC123"])
+                || !labelDocument.Lines[3].Words.Select(word => word.Text).SequenceEqual(["12:30"])
+                || !labelDocument.Lines[4].Words.Select(word => word.Text).SequenceEqual(["https://example.com"]))
+                throw new InvalidOperationException($"Colon-separated text changed unexpectedly: {labelDocument.Text}");
+            results["colonSeparatedSelection"] = new { accountNumber, fullText = labelDocument.Lines[1].Text };
+
             var hits = OcrSelection.Flatten(recognized);
             var selectedText = OcrSelection.TextBetween(hits, 0, hits.Count - 1);
             if (!selectedText.Contains("CIRCLE IMAGE TEXT", StringComparison.OrdinalIgnoreCase))
